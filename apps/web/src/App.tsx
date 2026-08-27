@@ -3,9 +3,16 @@ import heroImg from "./assets/hero.png";
 import reactLogo from "./assets/react.svg";
 import viteLogo from "./assets/vite.svg";
 import "./App.css";
+import { orpc } from "./orpc";
 
 function App() {
   const [count, setCount] = useState(0);
+  const [message, setMessage] = useState("Call the API to check the connection.");
+
+  const callApi = async () => {
+    const result = await orpc.hello();
+    setMessage(result.message);
+  };
 
   return (
     <>
@@ -24,6 +31,10 @@ function App() {
         <button type="button" className="counter" onClick={() => setCount((count) => count + 1)}>
           Count is {count}
         </button>
+        <button type="button" onClick={callApi}>
+          Call oRPC
+        </button>
+        <p>{message}</p>
       </section>
 
       <div className="ticks"></div>
