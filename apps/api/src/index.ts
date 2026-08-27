@@ -9,7 +9,7 @@ const rpcHandler = new RPCHandler(router);
 
 app.use("/api/auth/*", (c, next) => cors({ origin: c.env.WEB_URL, credentials: true })(c, next));
 app.all("/api/auth/*", (c) => createAuth({ ...c.env }).handler(c.req.raw));
-app.use("/rpc/*", cors());
+app.use("/rpc/*", (c, next) => cors({ origin: c.env.WEB_URL, credentials: true })(c, next));
 
 app.all("/rpc/*", async (c) => {
   const { matched, response } = await rpcHandler.handle(c.req.raw, {
