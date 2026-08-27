@@ -1,11 +1,13 @@
 ## FYP (Final Year Project)
 
-This project is acedamic btech final year project, which doesn't have name yet. About tech-stack: oRPC (with hono) for backend it's meant to be deployed on cloudflare-workers so keep that in consideration while implementing code, and about frontend it's React and @oRPC/client to work with our backend; db is postgresql(on neondb) ORM: drizzle.
-Don't be shy about asking valid questions; always make informed decisions.
-keep stuff simple and "yagni" just do as much required.
-follow the standards of coss ui for ui and ux.
-fonts go with IBM Plex for everything Sans, Mono, and serif.
-project uses better-auth for both AuthN and AuthZ.
+- This project is acedamic btech final year project, which doesn't have name yet. About tech-stack: oRPC (with hono) for backend it's meant to be deployed on cloudflare-workers so keep that in consideration while implementing code, and about frontend it's React and @oRPC/client to work with our backend; db is postgresql(on neondb) ORM: drizzle.
+- Add OpenAPI docs as per oRPC while writing code itself.
+- Don't be shy about asking valid questions; always make informed decisions.
+- Keep stuff simple and "yagni" just do as much required.
+- Follow the standards of coss ui for ui and ux.
+- Fonts go with IBM Plex for everything Sans, Mono, and serif.
+- Project uses better-auth for both AuthN and AuthZ.
+- Use zod for validation throughout the project.
 
 ## Guide:
 
