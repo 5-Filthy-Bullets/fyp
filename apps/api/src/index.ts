@@ -2,10 +2,13 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { RPCHandler } from "@orpc/server/fetch";
 import { router } from "./router";
+import { createAuth, type AuthEnv } from "./auth";
 
-const app = new Hono();
+const app = new Hono<{ Bindings: AuthEnv }>();
 const rpcHandler = new RPCHandler(router);
 
+app.use("/api/auth/*", (c, next) => cors({ origin: c.env.WEB_URL, credentials: true })(c, next));
+app.all("/api/auth/*", (c) => createAuth({ ...c.env }).handler(c.req.raw));
 app.use("/rpc/*", cors());
 
 app.all("/rpc/*", async (c) => {

@@ -1,13 +1,35 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import heroImg from "./assets/hero.png";
 import reactLogo from "./assets/react.svg";
 import viteLogo from "./assets/vite.svg";
 import "./App.css";
 import { orpc } from "./orpc";
+import { authClient } from "./auth-client";
 
 function App() {
   const [count, setCount] = useState(0);
   const [message, setMessage] = useState("Call the API to check the connection.");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
+  const [isSignUp, setIsSignUp] = useState(false);
+  const { data: session, isPending, refetch } = authClient.useSession();
+
+  const submitAuth = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const result = isSignUp
+      ? await authClient.signUp.email({ name, email, password })
+      : await authClient.signIn.email({ email, password });
+    setAuthMessage(result.error?.message ?? (isSignUp ? "Account created." : "Signed in."));
+    await refetch();
+  };
+
+  const signOut = async () => {
+    await authClient.signOut();
+    await refetch();
+    setAuthMessage("Signed out.");
+  };
 
   const callApi = async () => {
     const result = await orpc.hello();
@@ -35,6 +57,57 @@ function App() {
           Call oRPC
         </button>
         <p>{message}</p>
+        <div className="auth-card">
+          <h2>
+            {session
+              ? `Signed in as ${session.user.name}`
+              : isSignUp
+                ? "Create account"
+                : "Sign in"}
+          </h2>
+          {session ? (
+            <button type="button" onClick={signOut}>
+              Sign out
+            </button>
+          ) : (
+            <form onSubmit={submitAuth}>
+              {isSignUp && (
+                <input
+                  required
+                  placeholder="Name"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              )}
+              <input
+                required
+                type="email"
+                placeholder="Email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+              <input
+                required
+                minLength={8}
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+              <button type="submit" disabled={isPending}>
+                {isSignUp ? "Create account" : "Sign in"}
+              </button>
+            </form>
+          )}
+          <button
+            className="auth-toggle"
+            type="button"
+            onClick={() => setIsSignUp((value) => !value)}
+          >
+            {isSignUp ? "Already have an account? Sign in" : "Need an account? Sign up"}
+          </button>
+          {authMessage && <p role="status">{authMessage}</p>}
+        </div>
       </section>
 
       <div className="ticks"></div>

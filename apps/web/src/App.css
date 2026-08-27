@@ -17,6 +17,47 @@
   }
 }
 
+.auth-card {
+  width: min(100%, 360px);
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  text-align: left;
+  box-sizing: border-box;
+  box-shadow: var(--shadow);
+}
+
+.auth-card h2 {
+  font-size: 24px;
+  margin: 0 0 16px;
+}
+.auth-card form {
+  display: grid;
+  gap: 10px;
+}
+.auth-card input {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+}
+.auth-card button {
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+  font: inherit;
+}
+.auth-card .auth-toggle {
+  margin-top: 12px;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  text-align: left;
+}
+
 .hero {
   position: relative;
 

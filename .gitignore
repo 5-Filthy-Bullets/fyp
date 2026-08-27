@@ -1,5 +1,6 @@
 # dependencies
 node_modules
+apps/api/worker-configuration.d.ts
 .pnpm-store
 
 # build outputs
