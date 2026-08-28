@@ -6,7 +6,7 @@ import { parseEnv, type AppEnv } from "./env";
 
 export type AuthEnv = AppEnv;
 
-export const createAuth = (source: Record<string, unknown>) => {
+export const createAuth = (source: object) => {
   const env = parseEnv(source);
 
   return betterAuth({

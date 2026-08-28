@@ -10,8 +10,16 @@ const envSchema = z.object({
 
 export type AppEnv = z.infer<typeof envSchema>;
 
-export const parseEnv = (source: Record<string, unknown>) =>
-  parseEnvOrThrow(envSchema, source, ".env.local or Worker secrets");
+export const parseEnv = (source: object) =>
+  parseEnvOrThrow(
+    envSchema,
+    Object.fromEntries(Object.entries(source)),
+    ".env.local or Worker secrets",
+  );
 
-export const parseDatabaseUrl = (source: Record<string, unknown>) =>
-  parseEnvOrThrow(envSchema.pick({ DATABASE_URL: true }), source, "DATABASE_URL").DATABASE_URL;
+export const parseDatabaseUrl = (source: object) =>
+  parseEnvOrThrow(
+    envSchema.pick({ DATABASE_URL: true }),
+    Object.fromEntries(Object.entries(source)),
+    "DATABASE_URL",
+  ).DATABASE_URL;

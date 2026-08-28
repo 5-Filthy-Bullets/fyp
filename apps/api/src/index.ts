@@ -8,7 +8,7 @@ const app = new Hono<{ Bindings: AuthEnv }>();
 const rpcHandler = new RPCHandler(router);
 
 app.use("/api/auth/*", (c, next) => cors({ origin: c.env.WEB_URL, credentials: true })(c, next));
-app.all("/api/auth/*", (c) => createAuth({ ...c.env }).handler(c.req.raw));
+app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
 app.use("/rpc/*", (c, next) => cors({ origin: c.env.WEB_URL, credentials: true })(c, next));
 
 app.all("/rpc/*", async (c) => {
