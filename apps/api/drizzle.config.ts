@@ -1,9 +1,7 @@
-import { config } from "dotenv";
 import { defineConfig } from "drizzle-kit";
-import { parseDatabaseUrl } from "./src/env";
+import { loadDatabaseUrlFromDotEnv } from "./src/env";
 
-config({ path: "../../.env.local" });
-const databaseUrl = parseDatabaseUrl(process.env);
+const databaseUrl = loadDatabaseUrlFromDotEnv("../../.env.local");
 
 export default defineConfig({
   dialect: "postgresql",

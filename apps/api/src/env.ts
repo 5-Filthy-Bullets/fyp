@@ -1,3 +1,4 @@
+import { config } from "dotenv";
 import { z } from "zod";
 import { parseEnvOrThrow } from "./env-utils";
 
@@ -9,6 +10,11 @@ const envSchema = z.object({
 });
 
 export type AppEnv = z.infer<typeof envSchema>;
+
+export const loadDatabaseUrlFromDotEnv = (path: string) => {
+  config({ path });
+  return parseDatabaseUrl(process.env);
+};
 
 export const parseEnv = (source: object) =>
   parseEnvOrThrow(
