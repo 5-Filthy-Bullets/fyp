@@ -1,112 +1,84 @@
 import { useState } from "react";
-import heroImg from "./assets/hero.png";
-import reactLogo from "./assets/react.svg";
-import viteLogo from "./assets/vite.svg";
-import "./App.css";
+import { authClient } from "./auth";
 import { orpc } from "./orpc";
+import "./App.css";
 
 function App() {
-  const [count, setCount] = useState(0);
-  const [message, setMessage] = useState("Call the API to check the connection.");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState("Sign in or create an account to continue.");
+  const session = authClient.useSession();
+
+  const signUp = async () => {
+    const result = await authClient.signUp.email({ name: name.trim(), email: email.trim(), password });
+    setMessage(result.error?.message ?? "Account created.");
+  };
+
+  const signIn = async () => {
+    const result = await authClient.signIn.email({ email: email.trim(), password });
+    setMessage(result.error?.message ?? "Signed in.");
+  };
+
+  const signOut = async () => {
+    await authClient.signOut();
+    setMessage("Signed out.");
+  };
 
   const callApi = async () => {
-    const result = await orpc.hello();
-    setMessage(result.message);
+    try {
+      const result = await orpc.hello();
+      setMessage(result.message);
+    } catch {
+      setMessage("The protected request was rejected. Sign in first.");
+    }
   };
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button type="button" className="counter" onClick={() => setCount((count) => count + 1)}>
-          Count is {count}
-        </button>
-        <button type="button" onClick={callApi}>
-          Call oRPC
-        </button>
-        <p>{message}</p>
+    <main className="app-shell">
+      <header className="brand">
+        <p className="eyebrow">Final year project</p>
+        <h1>FYP</h1>
+        <p>A small, secure starting point for the project.</p>
+      </header>
+
+      <section className="auth-card" aria-labelledby="auth-heading">
+        <h2 id="auth-heading">{session.data ? "Your account" : "Welcome back"}</h2>
+        <p className="muted">
+          {session.data ? `Signed in as ${session.data.user.email}` : "Use your email to access the app."}
+        </p>
+
+        {!session.data ? (
+          <form onSubmit={(event) => event.preventDefault()}>
+            <label>
+              Name
+              <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Jane Doe" required autoComplete="name" />
+            </label>
+            <label>
+              Email
+              <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="jane@example.com" type="email" required autoComplete="email" />
+            </label>
+            <label>
+              Password
+              <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 8 characters" type="password" required minLength={8} autoComplete="current-password" />
+            </label>
+            <div className="actions">
+              <button className="primary" type="submit" onClick={signIn}>Sign in</button>
+              <button type="submit" onClick={signUp}>Create account</button>
+            </div>
+          </form>
+        ) : (
+          <div className="actions">
+            <button className="primary" type="button" onClick={callApi}>Call protected oRPC</button>
+            <button type="button" onClick={signOut}>Sign out</button>
+          </div>
+        )}
+
+        {session.isPending && <p className="status">Loading session...</p>}
+        {session.error && <p className="status">{session.error.message}</p>}
+        {message && <p className="status">{message}</p>}
       </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank" rel="noopener">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank" rel="noopener">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank" rel="noopener">
-                <svg className="button-icon" role="presentation" aria-hidden="true">
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank" rel="noopener">
-                <svg className="button-icon" role="presentation" aria-hidden="true">
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank" rel="noopener">
-                <svg className="button-icon" role="presentation" aria-hidden="true">
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank" rel="noopener">
-                <svg className="button-icon" role="presentation" aria-hidden="true">
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+    </main>
   );
 }
 

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@orpc/client": "^1.15.0",
+    "better-auth": "^1.7.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
