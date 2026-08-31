@@ -7,10 +7,14 @@
     "cf-typegen": "wrangler types --env-interface CloudflareBindings"
   },
   "dependencies": {
+    "@orpc/openapi": "^1.15.0",
     "@orpc/server": "^1.15.0",
+    "@orpc/zod": "^1.15.0",
     "hono": "^4.13.5"
   },
   "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/swagger-ui": "^5.32.0",
     "wrangler": "^4.110.0"
   }
 }
