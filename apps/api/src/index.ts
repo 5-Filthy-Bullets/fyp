@@ -4,33 +4,39 @@ import { RPCHandler } from "@orpc/server/fetch";
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { OpenAPIReferencePlugin } from "@orpc/openapi/plugins";
 import { ZodToJsonSchemaConverter } from "@orpc/zod";
+import { createAuth, type AuthEnv } from "./auth";
 import { router } from "./router";
 
-const app = new Hono();
-const rpcHandler = new RPCHandler(router);
-const openapiHandler = new OpenAPIHandler(router, {
-  plugins: [
-    new OpenAPIReferencePlugin({
-      docsPath: "/docs",
-      docsProvider: "swagger",
-      specPath: "/docs/spec.json",
-      schemaConverters: [new ZodToJsonSchemaConverter()],
-      specGenerateOptions: {
-        info: {
-          title: "FYP API",
-          version: "1.0.0",
-        },
-      },
-    }),
-  ],
+type Env = {
+  Bindings: AuthEnv;
+};
+
+const app = new Hono<Env>();
+
+app.use("/api/auth/*", async (c, next) => {
+  return cors({
+    origin: c.env.WEB_URL,
+    credentials: true,
+  })(c, next);
 });
 
-app.use("/rpc/*", cors());
+app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
+
+app.use("/rpc/*", async (c, next) => {
+  return cors({
+    origin: c.env.WEB_URL,
+    credentials: true,
+  })(c, next);
+});
 
 app.all("/rpc/*", async (c) => {
+  const rpcHandler = new RPCHandler(router);
   const { matched, response } = await rpcHandler.handle(c.req.raw, {
     prefix: "/rpc",
-    context: {},
+    context: {
+      headers: c.req.raw.headers,
+      auth: createAuth(c.env),
+    },
   });
 
   if (matched) {
@@ -40,14 +46,31 @@ app.all("/rpc/*", async (c) => {
   return c.text("Not found", 404);
 });
 
-app.get("/", (c) => {
-  return c.text("API is running");
-});
+app.get("/", (c) => c.text("API is running"));
 
 app.all("/*", async (c) => {
+  const openapiHandler = new OpenAPIHandler(router, {
+    plugins: [
+      new OpenAPIReferencePlugin({
+        docsPath: "/docs",
+        docsProvider: "swagger",
+        specPath: "/docs/spec.json",
+        schemaConverters: [new ZodToJsonSchemaConverter()],
+        specGenerateOptions: {
+          info: {
+            title: "FYP API",
+            version: "1.0.0",
+          },
+        },
+      }),
+    ],
+  });
   const { matched, response } = await openapiHandler.handle(c.req.raw, {
     prefix: "/",
-    context: {},
+    context: {
+      headers: c.req.raw.headers,
+      auth: createAuth(c.env),
+    },
   });
 
   if (matched) {
