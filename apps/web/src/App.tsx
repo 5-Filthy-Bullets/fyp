@@ -29,7 +29,8 @@ export function App() {
     try {
       const result = await orpc.hello();
       setMessage(result.message);
-    } catch {
+    } catch (error) {
+      console.error("The protected hello request failed.", error);
       setMessage("The protected request was rejected. Sign in first.");
     }
   };
