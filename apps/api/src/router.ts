@@ -2,10 +2,10 @@ import { ORPCError, os } from "@orpc/server";
 import { z } from "zod";
 import type { Auth } from "./auth";
 
-export type RpcContext = {
-	headers: Headers;
-	auth: Auth;
-};
+export interface RpcContext {
+	readonly headers: Headers;
+	readonly auth: Auth;
+}
 
 const protectedProcedure = os
 	.$context<RpcContext>()
