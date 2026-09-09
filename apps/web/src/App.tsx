@@ -3,7 +3,7 @@ import { authClient } from "./auth";
 import { orpc } from "./orpc";
 import "./App.css";
 
-function App() {
+export function App() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -81,5 +81,3 @@ function App() {
     </main>
   );
 }
-
-export default App;
