@@ -52,3 +52,15 @@ export const verification = pgTable("verification", {
 });
 
 export const authSchema = { user, session, account, verification };
+
+export type UserId = string & { readonly __brand: "UserId" };
+export const userId = (raw: string): UserId => raw as UserId;
+
+export type SessionId = string & { readonly __brand: "SessionId" };
+export const sessionId = (raw: string): SessionId => raw as SessionId;
+
+export type AccountId = string & { readonly __brand: "AccountId" };
+export const accountId = (raw: string): AccountId => raw as AccountId;
+
+export type VerificationId = string & { readonly __brand: "VerificationId" };
+export const verificationId = (raw: string): VerificationId => raw as VerificationId;
