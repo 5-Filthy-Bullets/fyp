@@ -60,6 +60,8 @@ app.all("/*", async (c) => {
           info: {
             title: "FYP API",
             version: "1.0.0",
+            description:
+              "Demo API built with oRPC + Hono on Cloudflare Workers. Try GET /hello (auth required) to see OpenAPI in action.",
           },
         },
       }),
