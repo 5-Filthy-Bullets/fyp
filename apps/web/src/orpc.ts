@@ -7,11 +7,14 @@ const RPC_TIMEOUT_MS = 10_000;
 
 const link = new RPCLink({
   url: `${import.meta.env.VITE_API_URL ?? "http://localhost:8787"}/rpc`,
-  fetch: (request, init) =>
+  fetch: (request, init, options) =>
     fetch(request, {
       ...init,
       credentials: "include",
-      signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
+      signal:
+        options.signal === undefined
+          ? AbortSignal.timeout(RPC_TIMEOUT_MS)
+          : AbortSignal.any([options.signal, AbortSignal.timeout(RPC_TIMEOUT_MS)]),
     }),
 });
 
