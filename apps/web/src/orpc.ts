@@ -3,9 +3,19 @@ import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
 import type { AppRouter } from "../../api/src/router";
 
+const RPC_TIMEOUT_MS = 10_000;
+
 const link = new RPCLink({
   url: `${import.meta.env.VITE_API_URL ?? "http://localhost:8787"}/rpc`,
-  fetch: (request, init) => fetch(request, { ...init, credentials: "include" }),
+  fetch: (request, init, options) =>
+    fetch(request, {
+      ...init,
+      credentials: "include",
+      signal:
+        options.signal === undefined
+          ? AbortSignal.timeout(RPC_TIMEOUT_MS)
+          : AbortSignal.any([options.signal, AbortSignal.timeout(RPC_TIMEOUT_MS)]),
+    }),
 });
 
 export const orpc: RouterClient<AppRouter> = createORPCClient(link);

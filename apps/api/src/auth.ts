@@ -4,13 +4,13 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { authSchema } from "./db/schema";
 
-export type AuthEnv = {
-  DATABASE_URL: string;
-  BETTER_AUTH_SECRET: string;
-  BETTER_AUTH_URL: string;
-  WEB_URL: string;
-  BETTER_AUTH_LOG_LVL?: "debug" | "info" | "warn" | "error";
-};
+export interface AuthEnv {
+  readonly DATABASE_URL: string;
+  readonly BETTER_AUTH_SECRET: string;
+  readonly BETTER_AUTH_URL: string;
+  readonly WEB_URL: string;
+  readonly BETTER_AUTH_LOG_LVL?: "debug" | "info" | "warn" | "error";
+}
 
 export const createAuth = (env: AuthEnv) => {
   const sql = neon(env.DATABASE_URL);

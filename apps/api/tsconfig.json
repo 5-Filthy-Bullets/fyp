@@ -5,8 +5,16 @@
     "moduleResolution": "Bundler",
     "strict": true,
     "skipLibCheck": true,
+    "types": ["node"],
     "lib": ["ESNext"],
     "jsx": "react-jsx",
-    "jsxImportSource": "hono/jsx"
+    "jsxImportSource": "hono/jsx",
+    "verbatimModuleSyntax": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "erasableSyntaxOnly": true,
+    "moduleDetection": "force"
   }
 }
