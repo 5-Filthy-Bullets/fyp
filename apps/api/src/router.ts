@@ -2,9 +2,24 @@ import { ORPCError, os } from "@orpc/server";
 import { z } from "zod";
 import type { Auth } from "./auth";
 
+/** Session value the router reads, inferred from the real Auth type. */
+export type RouterSession = Auth["$Infer"]["Session"];
+
+/**
+ * Narrow auth surface the router consumes. Full `Auth` satisfies this,
+ * so production still passes `createAuth()` straight through.
+ */
+export interface SessionReader {
+	readonly api: {
+		readonly getSession: (input: {
+			readonly headers: Headers;
+		}) => Promise<RouterSession | null>;
+	};
+}
+
 export interface RpcContext {
 	readonly headers: Headers;
-	readonly auth: Auth;
+	readonly auth: SessionReader;
 }
 
 const protectedProcedure = os
