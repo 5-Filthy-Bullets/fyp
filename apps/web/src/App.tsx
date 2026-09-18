@@ -1,7 +1,26 @@
 import { useState } from "react";
+import { ORPCError } from "@orpc/client";
 import { authClient } from "./auth";
 import { orpc } from "./orpc";
 import "./App.css";
+
+const errorName = (value: unknown): string | undefined => {
+  if (typeof value !== "object" || value === null) return undefined;
+  if (!("name" in value)) return undefined;
+  return typeof value.name === "string" ? value.name : undefined;
+};
+
+/** Timeout aborts surface as `TimeoutError`; caller cancels as `AbortError`, possibly wrapped in `cause`. */
+const isTimeoutOrAbort = (error: unknown): boolean => {
+  let current: unknown = error;
+  for (let depth = 0; depth < 3; depth += 1) {
+    const name = errorName(current);
+    if (name === "TimeoutError" || name === "AbortError") return true;
+    if (typeof current !== "object" || current === null || !("cause" in current)) return false;
+    current = current.cause;
+  }
+  return false;
+};
 
 export function App() {
   const [name, setName] = useState("");
@@ -31,7 +50,13 @@ export function App() {
       setMessage(result.message);
     } catch (error) {
       console.error("The protected hello request failed.", error);
-      setMessage("The protected request was rejected. Sign in first.");
+      if (error instanceof ORPCError && error.code === "UNAUTHORIZED") {
+        setMessage("The protected request was rejected. Sign in first.");
+      } else if (isTimeoutOrAbort(error)) {
+        setMessage("The request timed out. Try again.");
+      } else {
+        setMessage("The request failed. Check your connection and try again.");
+      }
     }
   };
 
