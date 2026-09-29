@@ -4,7 +4,7 @@ import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { router } from "./router";
 
 /**
- * The `/zod4` converter is the point of this file. The default `@orpc/zod/zod4`
+ * The `/zod4` converter is the point of this file. The default `@orpc/zod`
  * export targets zod 3, and against zod 4 schemas it converts everything to an
  * unrepresentable `{"not":{}}`. That fails loudly on procedures with a path
  * parameter, and silently produces an unusable spec everywhere else.
@@ -15,11 +15,33 @@ const generate = async () =>
   });
 
 describe("openapi spec", () => {
-  it("documents response schemas rather than unrepresentable ones", async () => {
+  it("exposes every procedure at its documented path", async () => {
     const spec = await generate();
-    const hello = spec.paths?.["/hello"]?.get;
 
-    expect(JSON.stringify(hello?.responses)).toContain('"message"');
-    expect(JSON.stringify(hello?.responses)).not.toContain('"not":{}');
+    expect(Object.keys(spec.paths ?? {}).sort()).toEqual([
+      "/hello",
+      "/me",
+      "/products",
+      "/tickets",
+      "/tickets/{ticketId}/status",
+    ]);
+  });
+
+  it("documents request bodies with real schemas rather than unrepresentable ones", async () => {
+    const spec = await generate();
+    const create = spec.paths?.["/tickets"]?.post;
+
+    // The generator types request bodies as `ReferenceObject | RequestBodyObject`,
+    // so these read the serialized form instead of narrowing the union by hand.
+    expect(JSON.stringify(create?.requestBody)).toContain(
+      '"required":["productId","title","description","reporterName"]',
+    );
+  });
+
+  it("describes the status enum the ticket procedures accept", async () => {
+    const spec = await generate();
+    const status = spec.paths?.["/tickets/{ticketId}/status"]?.patch?.requestBody;
+
+    expect(JSON.stringify(status)).toContain("in_progress");
   });
 });
