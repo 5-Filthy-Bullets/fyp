@@ -1,14 +1,16 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "api",
+  "name": "fyp-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-27",
   "compatibility_flags": [
     "nodejs_compat"
   ],
-  // "vars": {
-  //   "MY_VAR": "my-variable"
-  // },
+  "vars": {
+    "BETTER_AUTH_LOG_LVL": "error",
+    "BETTER_AUTH_URL": "https://fyp-api.razobeckett.workers.dev",
+    "WEB_URL": "https://fyp-web.pages.dev"
+  },
   // "kv_namespaces": [
   //   {
   //     "binding": "MY_KV_NAMESPACE",
