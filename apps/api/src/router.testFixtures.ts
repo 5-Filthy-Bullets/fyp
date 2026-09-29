@@ -5,7 +5,13 @@ import type { SessionReader } from "./router";
  * `SessionReader` so a drift in better-auth's session shape fails typecheck
  * instead of passing tests and failing at runtime.
  */
-export const authWithSession = (userName: string): SessionReader => ({
+export const authWithSession = (
+	userName: string,
+	user: { role: string; organizationId: string | null } = {
+		role: "client",
+		organizationId: "org-acme",
+	},
+): SessionReader => ({
   api: {
     getSession: async () => ({
       session: {
@@ -23,6 +29,8 @@ export const authWithSession = (userName: string): SessionReader => ({
         emailVerified: true,
         createdAt: new Date("2026-01-01T00:00:00Z"),
         updatedAt: new Date("2026-01-01T00:00:00Z"),
+        role: user.role,
+        organizationId: user.organizationId,
       },
     }),
   },
