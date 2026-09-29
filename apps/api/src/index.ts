@@ -3,7 +3,9 @@ import { cors } from "hono/cors";
 import { RPCHandler } from "@orpc/server/fetch";
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { OpenAPIReferencePlugin } from "@orpc/openapi/plugins";
-import { ZodToJsonSchemaConverter } from "@orpc/zod";
+// Must be the /zod4 entrypoint: the default `@orpc/zod` export targets zod 3
+// and converts every zod 4 schema to an unrepresentable `{"not":{}}`.
+import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { createAuth, type AuthEnv } from "./auth";
 import { router } from "./router";
 
