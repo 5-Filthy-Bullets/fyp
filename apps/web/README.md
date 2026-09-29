@@ -1,32 +1,34 @@
-# React + TypeScript + Vite
+# Web
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React 19 and Vite. The app talks to the API two ways:
 
-Currently, two official plugins are available:
+- `src/auth.ts` holds the Better Auth client, pointed at `${VITE_API_URL}/api/auth`.
+- `src/orpc.ts` holds a `RouterClient<AppRouter>` over `RPCLink`, pointed at `${VITE_API_URL}/rpc`.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Both send `credentials: "include"`, so the session cookie travels with every
+request. `authClient` uses `inferAdditionalFields<Auth>()` so the session type
+knows about the `role` and `organizationId` the API adds to the user.
 
-## React Compiler
+`src/App.tsx` renders by role, with no router library:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- `client` gets the intake form. The product dropdown comes from
+  `product.listForOrg`, which is already scoped to that client's org.
+- `technician` and `admin` get the ticket queue, with a status dropdown per row.
 
-## Expanding the Oxlint configuration
+Copy `.env.example` to `.env.local` and point `VITE_API_URL` at your Worker,
+then:
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```sh
+pnpm dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Demo accounts
+
+Seeded by `pnpm --filter api db:seed`, both with password `demo-password-123`:
+
+- `client@acme.test` files a ticket.
+- `tech@reliable.test` works the queue.
+
+Sign in as the client, file a ticket, then sign in as the technician in a
+separate browser profile or private window. The queue is not live-updating, so
+press Refresh to pull the new ticket in.
