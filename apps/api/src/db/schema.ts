@@ -1,4 +1,28 @@
-import { boolean, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, pgEnum, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
+
+/**
+ * Staff (admin, technician) work across every client org, so `user.role` and
+ * `user.organizationId` together decide what a session can see. Better Auth
+ * only knows about the core user table, so `auth.ts` declares these two
+ * columns again as server-owned `additionalFields`.
+ */
+export const userRole = pgEnum("user_role", ["admin", "technician", "client"]);
+
+export const ticketStatus = pgEnum("ticket_status", ["open", "in_progress", "resolved"]);
+
+/** A client company that buys from the vendor. */
+export const organization = pgTable("organization", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+});
+
+/** Something the vendor sells and the client can raise a ticket about. */
+export const product = pgTable("product", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+});
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -6,8 +30,47 @@ export const user = pgTable("user", {
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").notNull().default(false),
   image: text("image"),
+  role: userRole("role").notNull().default("client"),
+  /** Null for vendor staff, who are not tied to a single client org. */
+  organizationId: text("organization_id").references(() => organization.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
+});
+
+/** Which products a given org is entitled to see and file against. */
+export const orgProduct = pgTable(
+  "org_product",
+  {
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    productId: text("product_id")
+      .notNull()
+      .references(() => product.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.organizationId, table.productId] })],
+);
+
+export const ticket = pgTable("ticket", {
+  id: text("id").primaryKey(),
+  /** Taken from the reporter at creation, never from request input. */
+  organizationId: text("organization_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  productId: text("product_id")
+    .notNull()
+    .references(() => product.id),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  reporterName: text("reporter_name").notNull(),
+  status: ticketStatus("status").notNull().default("open"),
+  /** Set when a technician or admin claims the ticket. */
+  assignedTo: text("assigned_to").references(() => user.id, {
+    onDelete: "set null",
+  }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 export const session = pgTable("session", {
@@ -52,6 +115,15 @@ export const verification = pgTable("verification", {
 });
 
 export const authSchema = { user, session, account, verification };
+
+/** Everything outside the auth tables, so the oRPC context can query it all. */
+export const appSchema = {
+  ...authSchema,
+  organization,
+  product,
+  orgProduct,
+  ticket,
+};
 
 export type UserId = string & { readonly __brand: "UserId" };
 export const userId = (raw: string): UserId => raw as UserId;

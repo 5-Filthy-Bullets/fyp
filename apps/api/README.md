@@ -20,10 +20,40 @@ pnpm install
 pnpm dev
 ```
 
-Create the Better Auth tables in PostgreSQL during development:
+Create the Better Auth and ticket tables in PostgreSQL during development:
 
 ```sh
 pnpm db:push
 ```
 
 For a committed migration, use `pnpm db:generate`, then apply it with `pnpm db:migrate`.
+
+## Seed data
+
+`pnpm db:seed` creates one client org, two products linked to it, and two users:
+
+| Email                | Role         | Organization        |
+| -------------------- | ------------ | ------------------- |
+| `client@acme.test`   | `client`     | Acme Manufacturing  |
+| `tech@reliable.test` | `technician` | none (vendor staff) |
+
+Both use the password `demo-password-123`. The script signs users up through
+Better Auth, then writes the role and organization that Better Auth treats as
+server-owned. It is idempotent, so re-running it tops up rather than duplicating.
+
+## Endpoints
+
+Swagger UI is at `/docs`, the raw spec at `/docs/spec.json`. Every procedure
+carries `.route()` metadata. Roles come from the session user; the organization
+is read from the session, never from request input.
+
+| Method | Path                         | Who               | Does                                           |
+| ------ | ---------------------------- | ----------------- | ---------------------------------------------- |
+| GET    | `/me`                        | any signed in     | Caller id, role, organization                  |
+| GET    | `/products`                  | client            | Products linked to the caller's org            |
+| POST   | `/tickets`                   | client            | Files a ticket scoped to the caller's org      |
+| GET    | `/tickets`                   | technician, admin | Staff queue, optional `?organizationId=`       |
+| PATCH  | `/tickets/{ticketId}/status` | technician, admin | Changes status and records the caller as owner |
+| GET    | `/hello`                     | any signed in     | Demo greeting                                  |
+
+Each is reachable over both `/rpc/*` (typed client) and the REST path above.
