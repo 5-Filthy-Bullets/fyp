@@ -311,7 +311,10 @@ function SignInForm({ onMessage }: { onMessage: (text: string) => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const signIn = async () => {
+  // Driven by the form submit so Enter in either field works, not just the
+  // button. A single submit button is the only control here.
+  const signIn = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     const result = await authClient.signIn.email({ email: email.trim(), password });
     onMessage(result.error?.message ?? "Signed in.");
   };
@@ -320,7 +323,7 @@ function SignInForm({ onMessage }: { onMessage: (text: string) => void }) {
     <section className="panel auth-panel" aria-labelledby="signin-heading">
       <h2 id="signin-heading">Sign in</h2>
       <p className="muted">Use the seeded demo accounts to try each role.</p>
-      <form onSubmit={(event) => event.preventDefault()}>
+      <form onSubmit={signIn}>
         <label>
           Email
           <input
@@ -344,7 +347,7 @@ function SignInForm({ onMessage }: { onMessage: (text: string) => void }) {
           />
         </label>
         <div className="actions">
-          <button className="primary" type="submit" onClick={signIn}>
+          <button className="primary" type="submit">
             Sign in
           </button>
         </div>

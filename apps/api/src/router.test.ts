@@ -267,6 +267,29 @@ describe("ticket.list", () => {
     expect(fake.queries[0]?.params).toContain("org-acme");
   });
 
+  it("orders newest first, which is what the route and the UI both promise", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([ticketRow()]);
+
+    const list = router.ticket.list.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Toni Alvarez",
+          role: "technician",
+          organizationId: null,
+        }),
+        db: fake.db,
+      },
+    });
+
+    await list({});
+
+    // Regression: the queue read oldest-first while the copy said newest-first,
+    // so a fresh ticket landed at the bottom of the list.
+    expect(fake.queries[0]?.sql).toContain('order by "ticket"."created_at" desc');
+  });
+
   it("refuses client accounts", async () => {
     const list = router.ticket.list.callable({
       context: {
@@ -295,7 +318,7 @@ describe("ticket.setStatus", () => {
     db: fake.db,
   });
 
-  it("records the caller as the owner, which is how a technician claims a ticket", async () => {
+  it("claims an unassigned ticket for the caller", async () => {
     const fake = fakeDatabase();
     fake.queueRows([
       [
@@ -318,6 +341,32 @@ describe("ticket.setStatus", () => {
     expect(ticket.status).toBe("in_progress");
     expect(ticket.assignedTo).toBe("test-user-id");
     expect(fake.queries[0]?.params).toContain("test-user-id");
+  });
+
+  it("leaves an existing owner alone so a second technician cannot steal the ticket", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([
+      [
+        "ticket-1",
+        "org-acme",
+        "prod-line-9",
+        "Conveyor belt stops mid-cycle",
+        "The line halts after roughly twenty minutes of runtime.",
+        "Dana Okafor",
+        "resolved",
+        "other-technician-id",
+        new Date("2026-03-04T09:15:00Z"),
+      ],
+    ]);
+    fake.queueRows([ticketRow({ status: "resolved", assignedTo: "other-technician-id" })]);
+
+    const setStatus = router.ticket.setStatus.callable({ context: staffContext(fake) });
+    const { ticket } = await setStatus({ ticketId: "ticket-1", status: "resolved" });
+
+    // The caller is bound for the coalesce, but must not overwrite the owner.
+    expect(fake.queries[0]?.sql).toContain("coalesce");
+    expect(fake.queries[0]?.params).toContain("test-user-id");
+    expect(ticket.assignedTo).toBe("other-technician-id");
   });
 
   it("reports a missing ticket as not found", async () => {

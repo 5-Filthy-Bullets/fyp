@@ -1,5 +1,5 @@
 import { ORPCError, os } from "@orpc/server";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { readCaller, requireClientCaller, requireStaffCaller, type Caller } from "./access";
 import type { Auth } from "./auth";
@@ -220,7 +220,7 @@ export const ticketRouter = {
       path: "/tickets/{ticketId}/status",
       summary: "Claim a ticket or change its status",
       description:
-        "Moves a ticket to a new status. When the ticket has no assignee, the caller is recorded as the owner, which is how a technician claims it.",
+        "Moves a ticket to a new status. Claims an unassigned ticket for the caller, and leaves an existing owner alone so a second technician cannot silently steal a claimed ticket. There are no status-transition guards, so any status can move to any other.",
       tags: ["Tickets"],
     })
     .input(
@@ -235,7 +235,9 @@ export const ticketRouter = {
         .update(ticket)
         .set({
           status: input.status,
-          assignedTo: context.caller.userId,
+          // Fills an empty slot only. Overwriting would let whoever touched the
+          // status last silently take over a ticket someone else already claimed.
+          assignedTo: sql`coalesce(${ticket.assignedTo}, ${context.caller.userId})`,
         })
         .where(eq(ticket.id, input.ticketId))
         .returning();
@@ -324,7 +326,7 @@ const selectTickets = async (db: Database, filter: TicketFilter): Promise<Ticket
     .from(ticket)
     .innerJoin(organization, eq(ticket.organizationId, organization.id))
     .innerJoin(product, eq(ticket.productId, product.id))
-    .orderBy(ticket.createdAt);
+    .orderBy(desc(ticket.createdAt));
 
   return conditions.length > 0 ? base.where(and(...conditions)) : base;
 };
