@@ -1,6 +1,8 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import { userRole } from "./db/schema";
+import type { Database } from "./db/client";
+import { organization, user, userRole } from "./db/schema";
+import { eq } from "drizzle-orm";
 import type { RouterSession } from "./router";
 
 /** Single source of truth for roles: the Postgres enum the user table uses. */
@@ -90,4 +92,51 @@ export const requireStaffCaller = (session: RouterSession): Caller => {
   }
 
   return caller;
+};
+
+/** Admins only. Technicians get FORBIDDEN, same as clients. */
+export const requireAdminCaller = (session: RouterSession): Caller => {
+  const caller = readCaller(session);
+
+  if (caller.role !== "admin") {
+    throw new ORPCError("FORBIDDEN", {
+      message: "Only admins can use this endpoint.",
+    });
+  }
+
+  return caller;
+};
+
+/**
+ * Re-reads the user row (and the org row) behind a session. Banning drops
+ * sessions, but a ban can land between the session write and the next RPC
+ * call, so callers that need a fresh answer check this instead of trusting
+ * the cached session.
+ */
+export const assertCallerActive = async (db: Database, caller: Caller): Promise<void> => {
+  const [row] = await db
+    .select({ banned: user.banned })
+    .from(user)
+    .where(eq(user.id, caller.userId))
+    .limit(1);
+
+  if (!row || row.banned) {
+    throw new ORPCError("FORBIDDEN", {
+      message: "This account has been deactivated.",
+    });
+  }
+
+  if (caller.organizationId !== null) {
+    const [org] = await db
+      .select({ isActive: organization.isActive })
+      .from(organization)
+      .where(eq(organization.id, caller.organizationId))
+      .limit(1);
+
+    if (!org || !org.isActive) {
+      throw new ORPCError("FORBIDDEN", {
+        message: "This organization has been suspended.",
+      });
+    }
+  }
 };

@@ -1,7 +1,14 @@
 import { ORPCError, os } from "@orpc/server";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { readCaller, requireClientCaller, requireStaffCaller, type Caller } from "./access";
+import {
+  assertCallerActive,
+  readCaller,
+  requireAdminCaller,
+  requireClientCaller,
+  requireStaffCaller,
+  type Caller,
+} from "./access";
 import type { Auth } from "./auth";
 import type { Database } from "./db/client";
 import {
@@ -9,6 +16,7 @@ import {
   organization,
   orgProduct,
   product,
+  session,
   ticket,
   ticketMessage,
   ticketPriority,
@@ -24,9 +32,17 @@ export type RouterSession = Auth["$Infer"]["Session"];
  * Narrow auth surface the router consumes. Full `Auth` satisfies this,
  * so production still passes `createAuth()` straight through.
  */
+/** Minimal shape of the sign-up response the router reads back. */
+interface SignUpResult {
+  readonly user: { readonly id: string };
+}
+
 export interface SessionReader {
   readonly api: {
     readonly getSession: (input: { readonly headers: Headers }) => Promise<RouterSession | null>;
+    readonly signUpEmail: (input: {
+      readonly body: { readonly email: string; readonly name: string; readonly password: string };
+    }) => Promise<SignUpResult>;
   };
 }
 
@@ -63,6 +79,17 @@ const clientProcedure = protectedProcedure.use(({ context, next }) => {
 /** Vendor staff, who work across every client org. */
 const staffProcedure = protectedProcedure.use(({ context, next }) => {
   const caller = requireStaffCaller(context.session);
+  return next({ context: { ...context, caller } });
+});
+
+/**
+ * Admins only, with the account re-checked against the database. The session
+ * carries the role, but a ban or org suspension can land after the session
+ * is written, so the check runs per call instead of trusting cached data.
+ */
+const adminProcedure = protectedProcedure.use(async ({ context, next }) => {
+  const caller = requireAdminCaller(context.session);
+  await assertCallerActive(context.db, caller);
   return next({ context: { ...context, caller } });
 });
 
@@ -110,6 +137,297 @@ const ticketDetailOutput = z.object({
   ticket: ticketOutput,
   messages: z.array(messageOutput).describe("Replies oldest first, visibility-filtered by role"),
 });
+
+const userOutput = z.object({
+  id: z.string().describe("User id"),
+  name: z.string().describe("Display name"),
+  email: z.string().describe("Sign-in email"),
+  role: z.enum(userRole.enumValues).describe("Account role"),
+  organizationId: z.string().nullable().describe("Client org id, null for vendor staff"),
+  organizationName: z.string().nullable().describe("Client org name, null for vendor staff"),
+  banned: z.boolean().describe("True once an admin deactivates the account"),
+  createdAt: z.string().describe("ISO 8601 creation timestamp"),
+});
+
+const orgOutput = z.object({
+  id: z.string().describe("Organization id"),
+  name: z.string().describe("Company display name"),
+  slug: z.string().describe("URL-safe company identifier"),
+  isActive: z.boolean().describe("False once an admin suspends the company"),
+  memberCount: z.number().describe("Users linked to this organization"),
+  productCount: z.number().describe("Products this organization can file against"),
+});
+
+const orgDetailOutput = orgOutput.extend({
+  productIds: z.array(z.string()).describe("Entitled product ids"),
+});
+
+/** Search plus paging the admin lists share. Small caps keep it yagni. */
+const adminListInput = {
+  search: z
+    .string()
+    .trim()
+    .max(120)
+    .optional()
+    .describe("Matches name or email (users) or name (orgs, products)"),
+  limit: z.coerce.number().int().min(1).max(100).default(20).describe("Rows per page"),
+  offset: z.coerce.number().int().min(0).default(0).describe("Rows to skip"),
+};
+
+const lifecycleMessage = (active: boolean, noun: string): string =>
+  active ? `${noun} reactivated.` : `${noun} deactivated. Existing sessions are dropped.`;
+
+type UserJoin = {
+  readonly id: string;
+  readonly name: string;
+  readonly email: string;
+  readonly role: (typeof userRole.enumValues)[number];
+  readonly organizationId: string | null;
+  readonly organizationName: string | null;
+  readonly banned: boolean;
+  readonly createdAt: Date;
+};
+
+/** One account by id, with the org name resolved. */
+const selectUserById = async (db: Database, userId: string): Promise<UserJoin | undefined> => {
+  const rows = await db
+    .select({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      organizationId: user.organizationId,
+      organizationName: organization.name,
+      banned: user.banned,
+      createdAt: user.createdAt,
+    })
+    .from(user)
+    .leftJoin(organization, eq(user.organizationId, organization.id))
+    .where(eq(user.id, userId))
+    .limit(1);
+  return rows[0];
+};
+
+const toUserOutput = (row: UserJoin) => ({
+  id: row.id,
+  name: row.name,
+  email: row.email,
+  role: row.role,
+  organizationId: row.organizationId,
+  organizationName: row.organizationName,
+  banned: row.banned,
+  createdAt: row.createdAt.toISOString(),
+});
+
+/** User list with the org name resolved, so the page needs no second query. */
+const selectUsers = async (
+  db: Database,
+  filter: { readonly role?: "technician" | "client"; readonly search?: string },
+): Promise<UserJoin[]> => {
+  const needle = filter.search?.trim();
+  const conditions = [
+    ...(filter.role === undefined ? [] : [eq(user.role, filter.role)]),
+    ...(needle === undefined || needle === ""
+      ? []
+      : [or(ilike(user.name, `%${needle}%`), ilike(user.email, `%${needle}%`))]),
+  ];
+
+  const base = db
+    .select({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      organizationId: user.organizationId,
+      organizationName: organization.name,
+      banned: user.banned,
+      createdAt: user.createdAt,
+    })
+    .from(user)
+    .leftJoin(organization, eq(user.organizationId, organization.id))
+    .orderBy(desc(user.createdAt));
+
+  return conditions.length > 0 ? base.where(and(...conditions)) : base;
+};
+
+const emailInput = z
+  .email("Enter a valid email address.")
+  .transform((value) => value.toLowerCase());
+
+const slugify = (value: string): string =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+
+/**
+ * Creates the account through the same public sign-up that writes the
+ * credential row (scrypt hash better-auth verifies at sign-in), then stamps
+ * the server-owned role and org onto that row. Public sign-up can never set
+ * those fields itself (`input: false` in auth.ts), so writing them here is
+ * what keeps admin-created accounts in the same shape as seeded ones.
+ */
+const insertCredentialUser = async (
+  db: Database,
+  auth: SessionReader,
+  input: {
+    readonly name: string;
+    readonly email: string;
+    readonly password: string;
+    readonly role: "technician" | "client";
+    readonly organizationId: string | null;
+  },
+): Promise<string> => {
+  const created = await auth.api.signUpEmail({
+    body: { email: input.email, name: input.name, password: input.password },
+  });
+  const id = created.user.id;
+
+  await db
+    .update(user)
+    .set({ role: input.role, organizationId: input.organizationId })
+    .where(eq(user.id, id));
+
+  return id;
+};
+
+/**
+ * Reads a better-auth failure without importing its error class. The admin
+ * procedures translate duplicate-email and validation failures into oRPC
+ * errors the UI can show, and anything else becomes a generic failure so
+ * password hashes and driver messages never reach the client.
+ */
+const toAdminError = (error: unknown, fallback: string): ORPCError<string, unknown> => {
+  if (typeof error === "object" && error !== null && "body" in error) {
+    const body = (error as { body?: { code?: unknown; message?: unknown } }).body;
+    const code = typeof body?.code === "string" ? body.code : undefined;
+    if (code === "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL") {
+      return new ORPCError("CONFLICT", { message: "That email is already registered." });
+    }
+    if (typeof body?.message === "string" && body.message.length > 0) {
+      return new ORPCError("BAD_REQUEST", { message: body.message });
+    }
+  }
+  if (error instanceof ORPCError) {
+    return error;
+  }
+  return new ORPCError("INTERNAL_SERVER_ERROR", { message: fallback });
+};
+
+export const adminProductRouter = {
+  /**
+   * Full catalog for the admin entitlement editor. Clients use
+   * product.listForOrg; this one lists every product with its link count.
+   */
+  list: adminProcedure
+    .route({
+      method: "GET",
+      path: "/admin/products",
+      summary: "List every product with entitlement counts",
+      description:
+        "Admin catalog view. Returns all products with the number of organizations entitled to each, so the entitlement editor can show coverage.",
+      tags: ["Admin"],
+    })
+    .input(z.object(adminListInput))
+    .output(
+      z.object({
+        products: z.array(
+          productOutput.extend({
+            organizationCount: z.number().describe("Orgs entitled to this product"),
+          }),
+        ),
+        total: z.number().describe("Products matching the search"),
+      }),
+    )
+    .handler(async ({ context, input }) => {
+      const needle = input.search?.trim();
+      const conditions = [
+        ...(needle === undefined || needle === "" ? [] : [ilike(product.name, `%${needle}%`)]),
+      ];
+
+      const base = context.db
+        .select({
+          id: product.id,
+          name: product.name,
+          slug: product.slug,
+        })
+        .from(product)
+        .orderBy(asc(product.name));
+
+      const rows = conditions.length > 0 ? await base.where(and(...conditions)) : await base;
+
+      const links = await context.db.select({ productId: orgProduct.productId }).from(orgProduct);
+      const counts = new Map<string, number>();
+      for (const link of links) {
+        counts.set(link.productId, (counts.get(link.productId) ?? 0) + 1);
+      }
+
+      const products = rows
+        .map((row) => ({
+          ...row,
+          organizationCount: counts.get(row.id) ?? 0,
+        }))
+        .slice(input.offset, input.offset + input.limit);
+
+      return { products, total: rows.length };
+    }),
+
+  create: adminProcedure
+    .route({
+      method: "POST",
+      path: "/admin/products",
+      summary: "Create a product",
+      description:
+        "Adds a product to the catalog. The slug defaults to a slugified name when omitted, and must stay unique.",
+      tags: ["Admin"],
+      successStatus: 201,
+    })
+    .input(
+      z.object({
+        name: z.string().trim().min(2).max(120).describe("Product display name"),
+        slug: z
+          .string()
+          .trim()
+          .min(2)
+          .max(80)
+          .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Lowercase letters, digits, and dashes.")
+          .optional()
+          .describe("URL-safe identifier, slugified from the name when omitted"),
+      }),
+    )
+    .output(z.object({ product: productOutput }))
+    .handler(async ({ context, input }) => {
+      const slug = input.slug ?? slugify(input.name);
+      if (slug === "") {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "The name needs a letter or digit so a slug can be built from it.",
+        });
+      }
+
+      const existing = await context.db
+        .select({ id: product.id })
+        .from(product)
+        .where(eq(product.slug, slug))
+        .limit(1);
+      if (existing.length > 0) {
+        throw new ORPCError("CONFLICT", { message: "That product slug is already taken." });
+      }
+
+      const [created] = await context.db
+        .insert(product)
+        .values({ id: crypto.randomUUID(), name: input.name, slug })
+        .returning();
+      if (!created) {
+        throw new ORPCError("INTERNAL_SERVER_ERROR", {
+          message: "The product could not be saved.",
+        });
+      }
+
+      return { product: { id: created.id, name: created.name, slug: created.slug } };
+    }),
+};
 
 export const productRouter = {
   listForOrg: clientProcedure
@@ -699,6 +1017,698 @@ const selectMessages = async (db: Database, filter: MessageFilter) => {
   }));
 };
 
+/**
+ * Everything under /admin. The procedures share the admin guard, and the
+ * nested routers keep users, orgs, and products apart.
+ */
+export const adminUserRouter = {
+  /**
+   * Staff and client accounts in one list. The role filter is a fixed union
+   * (technician or client), so an admin can never list fellow admins here.
+   */
+  list: adminProcedure
+    .route({
+      method: "GET",
+      path: "/admin/users",
+      summary: "List technician and client accounts",
+      description:
+        "Admin directory. Pass role=technician for vendor techs or role=client for client accounts. Matches name or email on search. Paged with limit and offset.",
+      tags: ["Admin"],
+    })
+    .input(
+      z.object({
+        ...adminListInput,
+        role: z.enum(["technician", "client"]).optional().describe("Filter to one manageable role"),
+      }),
+    )
+    .output(z.object({ users: z.array(userOutput), total: z.number() }))
+    .handler(async ({ context, input }) => {
+      const rows = await selectUsers(context.db, {
+        ...(input.role === undefined ? {} : { role: input.role }),
+        ...(input.search === undefined ? {} : { search: input.search }),
+      });
+      const users = rows.slice(input.offset, input.offset + input.limit).map(toUserOutput);
+      return { users, total: rows.length };
+    }),
+
+  /**
+   * Creates a technician: staff account, no org. The password is the initial
+   * one the admin hands over outside the app, so the response never echoes
+   * it back.
+   */
+  createTechnician: adminProcedure
+    .route({
+      method: "POST",
+      path: "/admin/technicians",
+      summary: "Create a technician account",
+      description:
+        "Creates a vendor technician with the given name, email, and initial password. Technicians have no organization. The admin hands the password over outside the app.",
+      tags: ["Admin"],
+      successStatus: 201,
+    })
+    .input(
+      z.object({
+        name: z.string().trim().min(2).max(80).describe("Technician display name"),
+        email: emailInput.describe("Sign-in email, unique across accounts"),
+        password: z
+          .string()
+          .min(8)
+          .max(128)
+          .describe("Initial password, handed over outside the app"),
+      }),
+    )
+    .output(z.object({ user: userOutput }))
+    .handler(async ({ context, input }) => {
+      const taken = await context.db
+        .select({ id: user.id })
+        .from(user)
+        .where(eq(user.email, input.email))
+        .limit(1);
+      if (taken.length > 0) {
+        throw new ORPCError("CONFLICT", { message: "That email is already registered." });
+      }
+
+      let id: string;
+      try {
+        id = await insertCredentialUser(context.db, context.auth, {
+          name: input.name,
+          email: input.email,
+          password: input.password,
+          role: "technician",
+          organizationId: null,
+        });
+      } catch (error) {
+        throw toAdminError(error, "The technician could not be created.");
+      }
+
+      const created = await selectUserById(context.db, id);
+      if (!created) {
+        throw new ORPCError("INTERNAL_SERVER_ERROR", {
+          message: "The technician was created but could not be read back.",
+        });
+      }
+      return { user: toUserOutput(created) };
+    }),
+
+  /**
+   * One flow for a new client company: the org row, its first client user,
+   * and the product entitlements, created together. Splitting those across
+   * calls would leave half-made orgs behind when a step fails.
+   */
+  createClient: adminProcedure
+    .route({
+      method: "POST",
+      path: "/admin/clients",
+      summary: "Create a client company with its first user",
+      description:
+        "Creates the organization, its first client account, and the product entitlements in one flow. The admin hands the initial password over outside the app.",
+      tags: ["Admin"],
+      successStatus: 201,
+    })
+    .input(
+      z.object({
+        orgName: z.string().trim().min(2).max(120).describe("Company display name"),
+        orgSlug: z
+          .string()
+          .trim()
+          .min(2)
+          .max(80)
+          .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Lowercase letters, digits, and dashes.")
+          .optional()
+          .describe("URL-safe company identifier, slugified from the name when omitted"),
+        name: z.string().trim().min(2).max(80).describe("First client display name"),
+        email: emailInput.describe("First client sign-in email, unique across accounts"),
+        password: z
+          .string()
+          .min(8)
+          .max(128)
+          .describe("Initial password, handed over outside the app"),
+        productIds: z
+          .array(z.string().min(1))
+          .max(100)
+          .default([])
+          .describe("Products the new org may file tickets against"),
+      }),
+    )
+    .output(z.object({ user: userOutput, organization: orgDetailOutput }))
+    .handler(async ({ context, input }) => {
+      const slug = input.orgSlug ?? slugify(input.orgName);
+      if (slug === "") {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "The company name needs a letter or digit so a slug can be built from it.",
+        });
+      }
+
+      const orgTaken = await context.db
+        .select({ id: organization.id })
+        .from(organization)
+        .where(eq(organization.slug, slug))
+        .limit(1);
+      if (orgTaken.length > 0) {
+        throw new ORPCError("CONFLICT", { message: "That company slug is already taken." });
+      }
+
+      const emailTaken = await context.db
+        .select({ id: user.id })
+        .from(user)
+        .where(eq(user.email, input.email))
+        .limit(1);
+      if (emailTaken.length > 0) {
+        throw new ORPCError("CONFLICT", { message: "That email is already registered." });
+      }
+
+      if (input.productIds.length > 0) {
+        const found = await context.db
+          .select({ id: product.id })
+          .from(product)
+          .where(or(...input.productIds.map((productId) => eq(product.id, productId))));
+        const foundIds = new Set(found.map((row) => row.id));
+        const missing = input.productIds.filter((productId) => !foundIds.has(productId));
+        if (missing.length > 0) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: `Unknown products: ${missing.join(", ")}.`,
+          });
+        }
+      }
+
+      const orgId = crypto.randomUUID();
+      await context.db.insert(organization).values({ id: orgId, name: input.orgName, slug });
+
+      let userId: string;
+      try {
+        userId = await insertCredentialUser(context.db, context.auth, {
+          name: input.name,
+          email: input.email,
+          password: input.password,
+          role: "client",
+          organizationId: orgId,
+        });
+      } catch (error) {
+        await context.db.delete(organization).where(eq(organization.id, orgId));
+        throw toAdminError(error, "The client account could not be created.");
+      }
+
+      for (const productId of input.productIds) {
+        await context.db
+          .insert(orgProduct)
+          .values({ organizationId: orgId, productId })
+          .onConflictDoNothing();
+      }
+
+      const created = await selectUserById(context.db, userId);
+      if (!created) {
+        throw new ORPCError("INTERNAL_SERVER_ERROR", {
+          message: "The client was created but could not be read back.",
+        });
+      }
+      return {
+        user: toUserOutput(created),
+        organization: {
+          id: orgId,
+          name: input.orgName,
+          slug,
+          isActive: true,
+          memberCount: 1,
+          productCount: input.productIds.length,
+          productIds: input.productIds,
+        },
+      };
+    }),
+
+  /**
+   * Renames an account or moves it between roles and orgs. Role moves stay
+   * inside technician and client; admins cannot mint or demote fellow
+   * admins from here. Clearing the org on a client is rejected, since an
+   * org-less client cannot file or read anything.
+   */
+  update: adminProcedure
+    .route({
+      method: "PATCH",
+      path: "/admin/users/{userId}",
+      summary: "Edit an account",
+      description:
+        "Renames a technician or client account, and optionally moves it between the technician and client roles or into another org. Cannot touch admin accounts.",
+      tags: ["Admin"],
+    })
+    .input(
+      z.object({
+        userId: z.string().min(1).describe("User to edit"),
+        name: z.string().trim().min(2).max(80).optional().describe("New display name"),
+        role: z
+          .enum(["technician", "client"])
+          .optional()
+          .describe("New role, technician or client only"),
+        organizationId: z
+          .string()
+          .min(1)
+          .nullable()
+          .optional()
+          .describe("New org for clients, null for technicians"),
+      }),
+    )
+    .output(z.object({ user: userOutput }))
+    .handler(async ({ context, input }) => {
+      if (
+        input.name === undefined &&
+        input.role === undefined &&
+        input.organizationId === undefined
+      ) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "Pass a name, a role, an organization, or a mix.",
+        });
+      }
+
+      const [target] = await context.db
+        .select({ id: user.id, role: user.role })
+        .from(user)
+        .where(eq(user.id, input.userId))
+        .limit(1);
+      if (!target) {
+        throw new ORPCError("NOT_FOUND", { message: "That account does not exist." });
+      }
+      if (target.role === "admin") {
+        throw new ORPCError("FORBIDDEN", {
+          message: "Admin accounts cannot be edited here.",
+        });
+      }
+
+      const nextRole = input.role ?? target.role;
+      if (nextRole !== "technician" && nextRole !== "client") {
+        throw new ORPCError("FORBIDDEN", {
+          message: "Admin accounts cannot be edited here.",
+        });
+      }
+
+      const nextOrg = input.organizationId === undefined ? undefined : input.organizationId;
+      if (nextRole === "technician" && nextOrg !== undefined && nextOrg !== null) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "Technicians have no organization. Pass null or leave it out.",
+        });
+      }
+      if (nextRole === "client" && nextOrg === null) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "Clients need an organization. Move the account to an org instead.",
+        });
+      }
+      if (nextOrg !== undefined && nextOrg !== null) {
+        const [org] = await context.db
+          .select({ id: organization.id })
+          .from(organization)
+          .where(eq(organization.id, nextOrg))
+          .limit(1);
+        if (!org) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: "That organization does not exist.",
+          });
+        }
+      }
+
+      await context.db
+        .update(user)
+        .set({
+          ...(input.name === undefined ? {} : { name: input.name }),
+          ...(input.role === undefined ? {} : { role: input.role }),
+          ...(nextOrg === undefined ? {} : { organizationId: nextOrg }),
+        })
+        .where(eq(user.id, input.userId));
+
+      const updated = await selectUserById(context.db, input.userId);
+      if (!updated) {
+        throw new ORPCError("INTERNAL_SERVER_ERROR", {
+          message: "The account was updated but could not be read back.",
+        });
+      }
+      return { user: toUserOutput(updated) };
+    }),
+
+  /**
+   * Deactivate or reactivate. Banning drops every live session at once, so
+   * the account cannot finish what it was doing, and the sign-in hook plus
+   * the per-call check keep it out until reactivated.
+   */
+  setActive: adminProcedure
+    .route({
+      method: "PATCH",
+      path: "/admin/users/{userId}/active",
+      summary: "Deactivate or reactivate an account",
+      description:
+        "Deactivating bans the account and drops its live sessions, so it cannot sign in or call the API. Reactivating lifts the ban. Admins cannot deactivate themselves.",
+      tags: ["Admin"],
+    })
+    .input(
+      z.object({
+        userId: z.string().min(1).describe("User to change"),
+        active: z.boolean().describe("False to deactivate, true to reactivate"),
+        reason: z
+          .string()
+          .trim()
+          .max(500)
+          .optional()
+          .describe("Why the account was deactivated, shown on reactivation notes"),
+      }),
+    )
+    .output(z.object({ user: userOutput, message: z.string() }))
+    .handler(async ({ context, input }) => {
+      if (input.userId === context.caller.userId) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "You cannot deactivate your own admin account.",
+        });
+      }
+
+      const [target] = await context.db
+        .select({ id: user.id, role: user.role })
+        .from(user)
+        .where(eq(user.id, input.userId))
+        .limit(1);
+      if (!target) {
+        throw new ORPCError("NOT_FOUND", { message: "That account does not exist." });
+      }
+      if (target.role === "admin") {
+        throw new ORPCError("FORBIDDEN", {
+          message: "Admin accounts cannot be deactivated here.",
+        });
+      }
+
+      await context.db
+        .update(user)
+        .set({
+          banned: !input.active,
+          banReason: input.active ? null : (input.reason ?? null),
+          banExpires: null,
+        })
+        .where(eq(user.id, input.userId));
+
+      if (!input.active) {
+        await context.db.delete(session).where(eq(session.userId, input.userId));
+      }
+
+      const changed = await selectUserById(context.db, input.userId);
+      if (!changed) {
+        throw new ORPCError("INTERNAL_SERVER_ERROR", {
+          message: "The account was updated but could not be read back.",
+        });
+      }
+      return {
+        user: toUserOutput(changed),
+        message: lifecycleMessage(input.active, "Account"),
+      };
+    }),
+};
+
+export const adminOrgRouter = {
+  /** Company directory with member and entitlement counts per row. */
+  list: adminProcedure
+    .route({
+      method: "GET",
+      path: "/admin/organizations",
+      summary: "List client companies",
+      description:
+        "Admin company directory. Matches the company name on search. Paged with limit and offset.",
+      tags: ["Admin"],
+    })
+    .input(z.object(adminListInput))
+    .output(z.object({ organizations: z.array(orgOutput), total: z.number() }))
+    .handler(async ({ context, input }) => {
+      const needle = input.search?.trim();
+      const conditions = [
+        ...(needle === undefined || needle === "" ? [] : [ilike(organization.name, `%${needle}%`)]),
+      ];
+      const base = context.db
+        .select({
+          id: organization.id,
+          name: organization.name,
+          slug: organization.slug,
+          isActive: organization.isActive,
+        })
+        .from(organization)
+        .orderBy(asc(organization.name));
+      const orgs = conditions.length > 0 ? await base.where(and(...conditions)) : await base;
+
+      const members = await context.db.select({ organizationId: user.organizationId }).from(user);
+      const memberCounts = new Map<string, number>();
+      for (const member of members) {
+        if (member.organizationId !== null) {
+          memberCounts.set(
+            member.organizationId,
+            (memberCounts.get(member.organizationId) ?? 0) + 1,
+          );
+        }
+      }
+      const links = await context.db.select().from(orgProduct);
+      const productCounts = new Map<string, number>();
+      for (const link of links) {
+        productCounts.set(link.organizationId, (productCounts.get(link.organizationId) ?? 0) + 1);
+      }
+
+      const organizations = orgs.map((org) => ({
+        ...org,
+        memberCount: memberCounts.get(org.id) ?? 0,
+        productCount: productCounts.get(org.id) ?? 0,
+      }));
+      return {
+        organizations: organizations.slice(input.offset, input.offset + input.limit),
+        total: organizations.length,
+      };
+    }),
+
+  /** One company with its entitled product ids, for the entitlement editor. */
+  get: adminProcedure
+    .route({
+      method: "GET",
+      path: "/admin/organizations/{organizationId}",
+      summary: "Read one client company",
+      description:
+        "Company detail with member and entitlement counts plus the entitled product ids the editor checks off.",
+      tags: ["Admin"],
+    })
+    .input(z.object({ organizationId: z.string().min(1).describe("Company to read") }))
+    .output(z.object({ organization: orgDetailOutput }))
+    .handler(async ({ context, input }) => {
+      const [org] = await context.db
+        .select({
+          id: organization.id,
+          name: organization.name,
+          slug: organization.slug,
+          isActive: organization.isActive,
+        })
+        .from(organization)
+        .where(eq(organization.id, input.organizationId))
+        .limit(1);
+      if (!org) {
+        throw new ORPCError("NOT_FOUND", { message: "That company does not exist." });
+      }
+      const members = await context.db
+        .select({ id: user.id })
+        .from(user)
+        .where(eq(user.organizationId, org.id));
+      const links = await context.db
+        .select({ productId: orgProduct.productId })
+        .from(orgProduct)
+        .where(eq(orgProduct.organizationId, org.id));
+      return {
+        organization: {
+          ...org,
+          memberCount: members.length,
+          productCount: links.length,
+          productIds: links.map((link) => link.productId),
+        },
+      };
+    }),
+
+  /** Rename a company. The slug stays put so ticket links never break. */
+  update: adminProcedure
+    .route({
+      method: "PATCH",
+      path: "/admin/organizations/{organizationId}",
+      summary: "Rename a client company",
+      description: "Changes the company display name. The slug stays unchanged.",
+      tags: ["Admin"],
+    })
+    .input(
+      z.object({
+        organizationId: z.string().min(1).describe("Company to rename"),
+        name: z.string().trim().min(2).max(120).describe("New company display name"),
+      }),
+    )
+    .output(z.object({ organization: orgDetailOutput }))
+    .handler(async ({ context, input }) => {
+      const [updated] = await context.db
+        .update(organization)
+        .set({ name: input.name })
+        .where(eq(organization.id, input.organizationId))
+        .returning();
+      if (!updated) {
+        throw new ORPCError("NOT_FOUND", { message: "That company does not exist." });
+      }
+      const members = await context.db
+        .select({ id: user.id })
+        .from(user)
+        .where(eq(user.organizationId, updated.id));
+      const links = await context.db
+        .select({ productId: orgProduct.productId })
+        .from(orgProduct)
+        .where(eq(orgProduct.organizationId, updated.id));
+      return {
+        organization: {
+          id: updated.id,
+          name: updated.name,
+          slug: updated.slug,
+          isActive: updated.isActive,
+          memberCount: members.length,
+          productCount: links.length,
+          productIds: links.map((link) => link.productId),
+        },
+      };
+    }),
+
+  /**
+   * Suspend or reactivate a company. Suspending flips the flag and drops
+   * every member session at once; the sign-in hook and the per-call check
+   * keep the whole company out until reactivated.
+   */
+  setActive: adminProcedure
+    .route({
+      method: "PATCH",
+      path: "/admin/organizations/{organizationId}/active",
+      summary: "Suspend or reactivate a company",
+      description:
+        "Suspending drops every member session at once, so the whole company loses access immediately. Reactivating restores it.",
+      tags: ["Admin"],
+    })
+    .input(
+      z.object({
+        organizationId: z.string().min(1).describe("Company to change"),
+        active: z.boolean().describe("False to suspend, true to reactivate"),
+      }),
+    )
+    .output(z.object({ organization: orgDetailOutput, message: z.string() }))
+    .handler(async ({ context, input }) => {
+      const [updated] = await context.db
+        .update(organization)
+        .set({ isActive: input.active })
+        .where(eq(organization.id, input.organizationId))
+        .returning();
+      if (!updated) {
+        throw new ORPCError("NOT_FOUND", { message: "That company does not exist." });
+      }
+      const members = await context.db
+        .select({ id: user.id })
+        .from(user)
+        .where(eq(user.organizationId, updated.id));
+      if (!input.active) {
+        for (const member of members) {
+          await context.db.delete(session).where(eq(session.userId, member.id));
+        }
+      }
+      const links = await context.db
+        .select({ productId: orgProduct.productId })
+        .from(orgProduct)
+        .where(eq(orgProduct.organizationId, updated.id));
+      return {
+        organization: {
+          id: updated.id,
+          name: updated.name,
+          slug: updated.slug,
+          isActive: updated.isActive,
+          memberCount: members.length,
+          productCount: links.length,
+          productIds: links.map((link) => link.productId),
+        },
+        message: lifecycleMessage(input.active, "Company"),
+      };
+    }),
+
+  /**
+   * Replaces the entitlement set wholesale. The UI sends the checked ids;
+   * unknown ids fail the whole write so a typo never silently narrows
+   * what the org can file against.
+   */
+  setEntitlements: adminProcedure
+    .route({
+      method: "PUT",
+      path: "/admin/organizations/{organizationId}/products",
+      summary: "Set which products a company can file against",
+      description:
+        "Replaces the entitlement set for one company. Unknown product ids fail the whole write. The client filing form reads this through product.listForOrg.",
+      tags: ["Admin"],
+    })
+    .input(
+      z.object({
+        organizationId: z.string().min(1).describe("Company to entitle"),
+        productIds: z
+          .array(z.string().min(1))
+          .max(100)
+          .describe("Products the company may file tickets against"),
+      }),
+    )
+    .output(z.object({ organization: orgDetailOutput }))
+    .handler(async ({ context, input }) => {
+      const [org] = await context.db
+        .select({ id: organization.id })
+        .from(organization)
+        .where(eq(organization.id, input.organizationId))
+        .limit(1);
+      if (!org) {
+        throw new ORPCError("NOT_FOUND", { message: "That company does not exist." });
+      }
+      if (input.productIds.length > 0) {
+        const found = await context.db
+          .select({ id: product.id })
+          .from(product)
+          .where(or(...input.productIds.map((productId) => eq(product.id, productId))));
+        const foundIds = new Set(found.map((row) => row.id));
+        const missing = input.productIds.filter((productId) => !foundIds.has(productId));
+        if (missing.length > 0) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: `Unknown products: ${missing.join(", ")}.`,
+          });
+        }
+      }
+      await context.db
+        .delete(orgProduct)
+        .where(eq(orgProduct.organizationId, input.organizationId));
+      for (const productId of input.productIds) {
+        await context.db
+          .insert(orgProduct)
+          .values({ organizationId: input.organizationId, productId })
+          .onConflictDoNothing();
+      }
+      const [full] = await context.db
+        .select({
+          id: organization.id,
+          name: organization.name,
+          slug: organization.slug,
+          isActive: organization.isActive,
+        })
+        .from(organization)
+        .where(eq(organization.id, input.organizationId))
+        .limit(1);
+      if (!full) {
+        throw new ORPCError("INTERNAL_SERVER_ERROR", {
+          message: "The company was updated but could not be read back.",
+        });
+      }
+      const members = await context.db
+        .select({ id: user.id })
+        .from(user)
+        .where(eq(user.organizationId, input.organizationId));
+      return {
+        organization: {
+          ...full,
+          memberCount: members.length,
+          productCount: input.productIds.length,
+          productIds: input.productIds,
+        },
+      };
+    }),
+};
+
+export const adminRouter = {
+  user: adminUserRouter,
+  org: adminOrgRouter,
+  product: adminProductRouter,
+};
+
 export const router = {
   /**
    * Demo endpoint to showcase oRPC + OpenAPI.
@@ -738,6 +1748,7 @@ export const router = {
 
   product: productRouter,
   ticket: ticketRouter,
+  admin: adminRouter,
 };
 
 export type AppRouter = typeof router;

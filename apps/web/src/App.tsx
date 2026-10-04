@@ -1,4 +1,7 @@
 import { RouterProvider, createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
+import { AdminClientsPage } from "./routes/admin-clients";
+import { AdminProductsPage } from "./routes/admin-products";
+import { AdminTechniciansPage } from "./routes/admin-technicians";
 import { HomePage } from "./routes/home";
 import { LoginPage } from "./routes/login";
 import { TicketDetailPage } from "./routes/ticket-detail";
@@ -43,12 +46,33 @@ const ticketDetailRoute = createRoute({
   component: TicketDetailPage,
 });
 
+const adminClientsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/clients",
+  component: AdminClientsPage,
+});
+
+const adminTechniciansRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/technicians",
+  component: AdminTechniciansPage,
+});
+
+const adminProductsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/products",
+  component: AdminProductsPage,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
   ticketsRoute,
   newTicketRoute,
   ticketDetailRoute,
+  adminClientsRoute,
+  adminTechniciansRoute,
+  adminProductsRoute,
 ]);
 
 const router = createRouter({ routeTree });

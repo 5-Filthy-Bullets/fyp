@@ -15,8 +15,34 @@ export interface SessionUser {
  * `SessionReader` so a drift in better-auth's session shape fails typecheck
  * instead of passing tests and failing at runtime.
  */
+/**
+ * Queued sign-up ids. The fake returns a fixed id per call; the duplicate
+ * lookup the router runs next resolves it through `queuedSignUpIds` so the
+ * delete targets the same row signup created.
+ */
+const signUpQueue: { readonly id: string }[] = [];
+const queuedSignUpIds: string[] = [];
+
+export const queueSignUpUser = (id: string): void => {
+  signUpQueue.push({ id });
+  queuedSignUpIds.push(id);
+};
+
+/** Email lookup rows after a mocked sign-up: the duplicate row to delete. */
+export const signUpDuplicateRow = (): readonly unknown[] => {
+  const id = queuedSignUpIds.shift() ?? "signup-duplicate";
+  return [id];
+};
+
 export const authWithSession = (user: SessionUser): SessionReader => ({
   api: {
+    signUpEmail: async () => {
+      const next = signUpQueue.shift();
+      if (!next) {
+        throw new Error("No queued sign-up user. Call queueSignUpUser(id) first.");
+      }
+      return { user: { id: next.id } };
+    },
     getSession: async () => ({
       session: {
         id: "test-session-id",
@@ -42,6 +68,9 @@ export const authWithSession = (user: SessionUser): SessionReader => ({
 
 export const authWithoutSession = (): SessionReader => ({
   api: {
+    signUpEmail: async () => {
+      throw new Error("signUpEmail should not run without a session.");
+    },
     getSession: async () => null,
   },
 });
@@ -137,6 +166,36 @@ export const ticketRow = (
   };
 
   return ticketColumns.map((column) => values[column]);
+};
+
+/** Fake user row in the order the admin user select reads the columns. */
+export const userColumns = [
+  "id",
+  "name",
+  "email",
+  "role",
+  "organizationId",
+  "organizationName",
+  "banned",
+  "createdAt",
+] as const;
+
+export const userRow = (
+  overrides: Partial<Record<(typeof userColumns)[number], unknown>> = {},
+): readonly unknown[] => {
+  const values: Record<(typeof userColumns)[number], unknown> = {
+    id: "user-1",
+    name: "Toni Alvarez",
+    email: "tech@reliable.test",
+    role: "technician",
+    organizationId: null,
+    organizationName: null,
+    banned: false,
+    createdAt: new Date("2026-03-04T09:15:00Z"),
+    ...overrides,
+  };
+
+  return userColumns.map((column) => values[column]);
 };
 
 /** Column order of the message select, for positional fake rows. */

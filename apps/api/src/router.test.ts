@@ -5,8 +5,10 @@ import {
   authWithoutSession,
   fakeDatabase,
   messageRow,
+  queueSignUpUser,
   sessionHeaders,
   ticketRow,
+  userRow,
 } from "./router.testFixtures";
 
 const headers = sessionHeaders;
@@ -926,6 +928,440 @@ describe("ticket.listMessages", () => {
 
     await expect(listMessages({ ticketId: "ticket-1" })).rejects.toMatchObject({
       code: "NOT_FOUND",
+    });
+  });
+});
+
+describe("admin guard", () => {
+  const adminContext = (fake: ReturnType<typeof fakeDatabase>) => ({
+    headers,
+    auth: authWithSession({
+      name: "Ada Admin",
+      role: "admin" as const,
+      organizationId: null,
+    }),
+    db: fake.db,
+  });
+
+  it("refuses technicians on admin user lists", async () => {
+    const list = router.admin.user.list.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Toni Alvarez",
+          role: "technician",
+          organizationId: null,
+        }),
+        db: fakeDatabase().db,
+      },
+    });
+
+    await expect(list({})).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("refuses clients on admin product creation", async () => {
+    const create = router.admin.product.create.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Dana Okafor",
+          role: "client",
+          organizationId: "org-acme",
+        }),
+        db: fakeDatabase().db,
+      },
+    });
+
+    await expect(create({ name: "Line 10 Controller" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
+
+  it("fails closed when the admin account is banned behind its session", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[true]]);
+
+    const list = router.admin.user.list.callable({ context: adminContext(fake) });
+
+    await expect(list({})).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(fake.queries).toHaveLength(1);
+  });
+});
+
+describe("admin.user.list", () => {
+  const adminContext = (fake: ReturnType<typeof fakeDatabase>) => ({
+    headers,
+    auth: authWithSession({
+      name: "Ada Admin",
+      role: "admin" as const,
+      organizationId: null,
+    }),
+    db: fake.db,
+  });
+
+  it("returns technicians with the org name resolved", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[false]]);
+    fake.queueRows([userRow(), userRow({ id: "user-2", email: "tech2@reliable.test" })]);
+
+    const list = router.admin.user.list.callable({ context: adminContext(fake) });
+    const result = await list({ role: "technician" });
+
+    expect(result.total).toBe(2);
+    expect(result.users[0]?.role).toBe("technician");
+    expect(fake.queries[1]?.sql).toContain("desc");
+  });
+
+  it("filters on name or email when a search is passed", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[false]]);
+    fake.queueRows([userRow({ name: "Dana Okafor" })]);
+
+    const list = router.admin.user.list.callable({ context: adminContext(fake) });
+    await list({ search: "dana" });
+
+    expect(fake.queries[1]?.params).toContain("%dana%");
+  });
+});
+
+describe("admin.user.createTechnician", () => {
+  const adminContext = (fake: ReturnType<typeof fakeDatabase>) => ({
+    headers,
+    auth: authWithSession({
+      name: "Ada Admin",
+      role: "admin" as const,
+      organizationId: null,
+    }),
+    db: fake.db,
+  });
+
+  const validInput = {
+    name: "New Tech",
+    email: "newtech@reliable.test",
+    password: "demo-password-123",
+  };
+
+  it("creates a technician with no organization", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[false]]);
+    fake.queueRows([]);
+    queueSignUpUser("tech-new");
+    fake.queueRows([]);
+    fake.queueRows([userRow({ id: "tech-new", name: "New Tech" })]);
+
+    const create = router.admin.user.createTechnician.callable({ context: adminContext(fake) });
+    const result = await create(validInput);
+
+    expect(result.user.role).toBe("technician");
+    expect(result.user.organizationId).toBeNull();
+  });
+
+  it("reports a duplicate email as conflict before touching auth", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[false]]);
+    fake.queueRows([["tech-taken"]]);
+
+    const create = router.admin.user.createTechnician.callable({ context: adminContext(fake) });
+
+    await expect(create(validInput)).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("rejects a password too short to hand over", async () => {
+    const create = router.admin.user.createTechnician.callable({
+      context: adminContext(fakeDatabase()),
+    });
+
+    await expect(create({ ...validInput, password: "short" })).rejects.toThrow();
+  });
+});
+
+describe("admin.user.update", () => {
+  const adminContext = (fake: ReturnType<typeof fakeDatabase>) => ({
+    headers,
+    auth: authWithSession({
+      name: "Ada Admin",
+      role: "admin" as const,
+      organizationId: null,
+    }),
+    db: fake.db,
+  });
+
+  it("renames a technician", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[false]]);
+    fake.queueRows([["tech-1", "technician"]]);
+    fake.queueRows([]);
+    fake.queueRows([userRow({ id: "tech-1", name: "Renamed Tech" })]);
+
+    const update = router.admin.user.update.callable({ context: adminContext(fake) });
+    const result = await update({ userId: "tech-1", name: "Renamed Tech" });
+
+    expect(result.user.name).toBe("Renamed Tech");
+  });
+
+  it("refuses to touch admin accounts", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[false]]);
+    fake.queueRows([["admin-1", "admin"]]);
+
+    const update = router.admin.user.update.callable({ context: adminContext(fake) });
+
+    await expect(update({ userId: "admin-1", name: "Nope" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
+
+  it("rejects an update with nothing to change", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[false]]);
+
+    const update = router.admin.user.update.callable({ context: adminContext(fake) });
+
+    await expect(update({ userId: "tech-1" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});
+
+describe("admin.user.setActive", () => {
+  const adminContext = (fake: ReturnType<typeof fakeDatabase>) => ({
+    headers,
+    auth: authWithSession({
+      name: "Ada Admin",
+      role: "admin" as const,
+      organizationId: null,
+    }),
+    db: fake.db,
+  });
+
+  it("bans the account and drops its sessions", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[false]]);
+    fake.queueRows([["tech-1", "technician"]]);
+    fake.queueRows([]);
+    fake.queueRows([]);
+    fake.queueRows([userRow({ id: "tech-1", banned: true })]);
+
+    const setActive = router.admin.user.setActive.callable({ context: adminContext(fake) });
+    const result = await setActive({ userId: "tech-1", active: false });
+
+    expect(result.user.banned).toBe(true);
+    expect(result.message).toContain("deactivated");
+  });
+
+  it("refuses to deactivate the caller's own admin account", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[false]]);
+
+    const setActive = router.admin.user.setActive.callable({ context: adminContext(fake) });
+
+    await expect(setActive({ userId: "test-user-id", active: false })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+  });
+});
+
+describe("admin.org", () => {
+  const adminContext = (fake: ReturnType<typeof fakeDatabase>) => ({
+    headers,
+    auth: authWithSession({
+      name: "Ada Admin",
+      role: "admin" as const,
+      organizationId: null,
+    }),
+    db: fake.db,
+  });
+
+  it("lists companies with member and product counts", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[false]]);
+    fake.queueRows([["org-acme", "Acme Manufacturing", "acme-manufacturing", true]]);
+    fake.queueRows([["org-acme"], ["org-acme"]]);
+    fake.queueRows([["org-acme", "prod-line-9"]]);
+
+    const list = router.admin.org.list.callable({ context: adminContext(fake) });
+    const result = await list({});
+
+    expect(result.total).toBe(1);
+    expect(result.organizations[0]?.memberCount).toBe(2);
+    expect(result.organizations[0]?.productCount).toBe(1);
+  });
+
+  it("replaces the entitlement set wholesale", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[false]]);
+    fake.queueRows([["org-acme"]]);
+    fake.queueRows([["prod-line-9"], ["prod-scan-2"]]);
+    fake.queueRows([]);
+    fake.queueRows([]);
+    fake.queueRows([]);
+    fake.queueRows([["org-acme", "Acme Manufacturing", "acme-manufacturing", true]]);
+    fake.queueRows([["user-1"]]);
+
+    const setEntitlements = router.admin.org.setEntitlements.callable({
+      context: adminContext(fake),
+    });
+    const result = await setEntitlements({
+      organizationId: "org-acme",
+      productIds: ["prod-line-9", "prod-scan-2"],
+    });
+
+    expect(result.organization.productIds).toEqual(["prod-line-9", "prod-scan-2"]);
+  });
+
+  it("rejects unknown product ids instead of narrowing silently", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[false]]);
+    fake.queueRows([["org-acme"]]);
+    fake.queueRows([]);
+
+    const setEntitlements = router.admin.org.setEntitlements.callable({
+      context: adminContext(fake),
+    });
+
+    await expect(
+      setEntitlements({ organizationId: "org-acme", productIds: ["prod-ghost"] }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("suspends the company and reports it", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[false]]);
+    fake.queueRows([["org-acme", "Acme Manufacturing", "acme-manufacturing", false]]);
+    fake.queueRows([["user-1"], ["user-2"]]);
+    fake.queueRows([]);
+    fake.queueRows([]);
+    fake.queueRows([]);
+
+    const setActive = router.admin.org.setActive.callable({ context: adminContext(fake) });
+    const result = await setActive({ organizationId: "org-acme", active: false });
+
+    expect(result.organization.isActive).toBe(false);
+    expect(result.message).toContain("deactivated");
+  });
+
+  it("refuses technicians on org lists", async () => {
+    const list = router.admin.org.list.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Toni Alvarez",
+          role: "technician",
+          organizationId: null,
+        }),
+        db: fakeDatabase().db,
+      },
+    });
+
+    await expect(list({})).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+});
+
+describe("admin.product", () => {
+  const adminContext = (fake: ReturnType<typeof fakeDatabase>) => ({
+    headers,
+    auth: authWithSession({
+      name: "Ada Admin",
+      role: "admin" as const,
+      organizationId: null,
+    }),
+    db: fake.db,
+  });
+
+  it("creates a product with a slugified name", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[false]]);
+    fake.queueRows([]);
+    fake.queueRows([["prod-new", "Line 10 Controller", "line-10-controller"]]);
+
+    const create = router.admin.product.create.callable({ context: adminContext(fake) });
+    const result = await create({ name: "Line 10 Controller" });
+
+    expect(result.product.slug).toBe("line-10-controller");
+  });
+
+  it("reports a duplicate slug as conflict", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[false]]);
+    fake.queueRows([["prod-taken"]]);
+
+    const create = router.admin.product.create.callable({ context: adminContext(fake) });
+
+    await expect(
+      create({ name: "Line 9 Controller", slug: "line-9-controller" }),
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+  });
+});
+
+describe("admin.user.createClient", () => {
+  const adminContext = (fake: ReturnType<typeof fakeDatabase>) => ({
+    headers,
+    auth: authWithSession({
+      name: "Ada Admin",
+      role: "admin" as const,
+      organizationId: null,
+    }),
+    db: fake.db,
+  });
+
+  const validInput = {
+    orgName: "Globex Corporation",
+    name: "Hank Scorpio",
+    email: "hank@globex.test",
+    password: "demo-password-123",
+    productIds: ["prod-line-9"],
+  };
+
+  it("creates the org, the user, and the entitlements in one flow", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[false]]);
+    fake.queueRows([]);
+    fake.queueRows([]);
+    fake.queueRows([["prod-line-9"]]);
+    fake.queueRows([]);
+    queueSignUpUser("client-new");
+    fake.queueRows([]);
+    fake.queueRows([]);
+    fake.queueRows([
+      userRow({
+        id: "client-new",
+        name: "Hank Scorpio",
+        email: "hank@globex.test",
+        role: "client",
+        organizationId: "org-new",
+        organizationName: "Globex Corporation",
+      }),
+    ]);
+
+    const create = router.admin.user.createClient.callable({ context: adminContext(fake) });
+    const result = await create(validInput);
+
+    expect(result.user.role).toBe("client");
+    expect(result.organization.productIds).toEqual(["prod-line-9"]);
+    expect(result.organization.productCount).toBe(1);
+  });
+
+  it("reports a taken company slug as conflict", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[false]]);
+    fake.queueRows([["org-taken"]]);
+
+    const create = router.admin.user.createClient.callable({ context: adminContext(fake) });
+
+    await expect(create(validInput)).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("rejects unknown products before creating anything", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([[false]]);
+    fake.queueRows([]);
+    fake.queueRows([]);
+    fake.queueRows([]);
+
+    const create = router.admin.user.createClient.callable({ context: adminContext(fake) });
+
+    await expect(create({ ...validInput, productIds: ["prod-ghost"] })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
     });
   });
 });

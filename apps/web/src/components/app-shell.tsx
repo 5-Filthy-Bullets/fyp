@@ -13,6 +13,7 @@ import {
   LogOut,
   Menu as MenuIcon,
   Moon,
+  Package,
   Search,
   Sun,
   Ticket,
@@ -50,8 +51,9 @@ const primaryNav: readonly NavItem[] = [
 ];
 
 const adminNav: readonly NavItem[] = [
-  { to: "/", label: "Clients", icon: Building, roles: ["admin"] },
-  { to: "/", label: "Technicians", icon: Users, roles: ["admin"] },
+  { to: "/admin/clients", label: "Clients", icon: Building, roles: ["admin"] },
+  { to: "/admin/technicians", label: "Technicians", icon: Users, roles: ["admin"] },
+  { to: "/admin/products", label: "Products", icon: Package, roles: ["admin"] },
 ];
 
 const shellTitle: Record<Role, string> = {
