@@ -144,10 +144,7 @@ const userOutput = z.object({
   email: z.string().describe("Sign-in email"),
   role: z.enum(userRole.enumValues).describe("Account role"),
   organizationId: z.string().nullable().describe("Client org id, null for vendor staff"),
-  organizationName: z
-    .string()
-    .nullable()
-    .describe("Client org name, null for vendor staff"),
+  organizationName: z.string().nullable().describe("Client org name, null for vendor staff"),
   banned: z.boolean().describe("True once an admin deactivates the account"),
   createdAt: z.string().describe("ISO 8601 creation timestamp"),
 });
@@ -253,7 +250,9 @@ const selectUsers = async (
   return conditions.length > 0 ? base.where(and(...conditions)) : base;
 };
 
-const emailInput = z.email("Enter a valid email address.").transform((value) => value.toLowerCase());
+const emailInput = z
+  .email("Enter a valid email address.")
+  .transform((value) => value.toLowerCase());
 
 const slugify = (value: string): string =>
   value
@@ -300,7 +299,7 @@ const insertCredentialUser = async (
  * errors the UI can show, and anything else becomes a generic failure so
  * password hashes and driver messages never reach the client.
  */
-const toAdminError = (error: unknown, fallback: string): ORPCError => {
+const toAdminError = (error: unknown, fallback: string): ORPCError<string, unknown> => {
   if (typeof error === "object" && error !== null && "body" in error) {
     const body = (error as { body?: { code?: unknown; message?: unknown } }).body;
     const code = typeof body?.code === "string" ? body.code : undefined;
@@ -345,9 +344,7 @@ export const adminProductRouter = {
     .handler(async ({ context, input }) => {
       const needle = input.search?.trim();
       const conditions = [
-        ...(needle === undefined || needle === ""
-          ? []
-          : [ilike(product.name, `%${needle}%`)]),
+        ...(needle === undefined || needle === "" ? [] : [ilike(product.name, `%${needle}%`)]),
       ];
 
       const base = context.db
@@ -361,9 +358,7 @@ export const adminProductRouter = {
 
       const rows = conditions.length > 0 ? await base.where(and(...conditions)) : await base;
 
-      const links = await context.db
-        .select({ productId: orgProduct.productId })
-        .from(orgProduct);
+      const links = await context.db.select({ productId: orgProduct.productId }).from(orgProduct);
       const counts = new Map<string, number>();
       for (const link of links) {
         counts.set(link.productId, (counts.get(link.productId) ?? 0) + 1);
@@ -1043,10 +1038,7 @@ export const adminUserRouter = {
     .input(
       z.object({
         ...adminListInput,
-        role: z
-          .enum(["technician", "client"])
-          .optional()
-          .describe("Filter to one manageable role"),
+        role: z.enum(["technician", "client"]).optional().describe("Filter to one manageable role"),
       }),
     )
     .output(z.object({ users: z.array(userOutput), total: z.number() }))
@@ -1055,9 +1047,7 @@ export const adminUserRouter = {
         ...(input.role === undefined ? {} : { role: input.role }),
         ...(input.search === undefined ? {} : { search: input.search }),
       });
-      const users = rows
-        .slice(input.offset, input.offset + input.limit)
-        .map(toUserOutput);
+      const users = rows.slice(input.offset, input.offset + input.limit).map(toUserOutput);
       return { users, total: rows.length };
     }),
 
@@ -1080,7 +1070,11 @@ export const adminUserRouter = {
       z.object({
         name: z.string().trim().min(2).max(80).describe("Technician display name"),
         email: emailInput.describe("Sign-in email, unique across accounts"),
-        password: z.string().min(8).max(128).describe("Initial password, handed over outside the app"),
+        password: z
+          .string()
+          .min(8)
+          .max(128)
+          .describe("Initial password, handed over outside the app"),
       }),
     )
     .output(z.object({ user: userOutput }))
@@ -1144,7 +1138,11 @@ export const adminUserRouter = {
           .describe("URL-safe company identifier, slugified from the name when omitted"),
         name: z.string().trim().min(2).max(80).describe("First client display name"),
         email: emailInput.describe("First client sign-in email, unique across accounts"),
-        password: z.string().min(8).max(128).describe("Initial password, handed over outside the app"),
+        password: z
+          .string()
+          .min(8)
+          .max(128)
+          .describe("Initial password, handed over outside the app"),
         productIds: z
           .array(z.string().min(1))
           .max(100)
@@ -1183,9 +1181,7 @@ export const adminUserRouter = {
         const found = await context.db
           .select({ id: product.id })
           .from(product)
-          .where(
-            or(...input.productIds.map((productId) => eq(product.id, productId))),
-          );
+          .where(or(...input.productIds.map((productId) => eq(product.id, productId))));
         const foundIds = new Set(found.map((row) => row.id));
         const missing = input.productIds.filter((productId) => !foundIds.has(productId));
         if (missing.length > 0) {
@@ -1272,7 +1268,11 @@ export const adminUserRouter = {
     )
     .output(z.object({ user: userOutput }))
     .handler(async ({ context, input }) => {
-      if (input.name === undefined && input.role === undefined && input.organizationId === undefined) {
+      if (
+        input.name === undefined &&
+        input.role === undefined &&
+        input.organizationId === undefined
+      ) {
         throw new ORPCError("BAD_REQUEST", {
           message: "Pass a name, a role, an organization, or a mix.",
         });
@@ -1299,10 +1299,7 @@ export const adminUserRouter = {
         });
       }
 
-      const nextOrg =
-        input.organizationId === undefined
-          ? undefined
-          : input.organizationId;
+      const nextOrg = input.organizationId === undefined ? undefined : input.organizationId;
       if (nextRole === "technician" && nextOrg !== undefined && nextOrg !== null) {
         throw new ORPCError("BAD_REQUEST", {
           message: "Technicians have no organization. Pass null or leave it out.",
@@ -1434,9 +1431,7 @@ export const adminOrgRouter = {
     .handler(async ({ context, input }) => {
       const needle = input.search?.trim();
       const conditions = [
-        ...(needle === undefined || needle === ""
-          ? []
-          : [ilike(organization.name, `%${needle}%`)]),
+        ...(needle === undefined || needle === "" ? [] : [ilike(organization.name, `%${needle}%`)]),
       ];
       const base = context.db
         .select({
@@ -1449,13 +1444,14 @@ export const adminOrgRouter = {
         .orderBy(asc(organization.name));
       const orgs = conditions.length > 0 ? await base.where(and(...conditions)) : await base;
 
-      const members = await context.db
-        .select({ organizationId: user.organizationId })
-        .from(user);
+      const members = await context.db.select({ organizationId: user.organizationId }).from(user);
       const memberCounts = new Map<string, number>();
       for (const member of members) {
         if (member.organizationId !== null) {
-          memberCounts.set(member.organizationId, (memberCounts.get(member.organizationId) ?? 0) + 1);
+          memberCounts.set(
+            member.organizationId,
+            (memberCounts.get(member.organizationId) ?? 0) + 1,
+          );
         }
       }
       const links = await context.db.select().from(orgProduct);

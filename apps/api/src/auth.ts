@@ -24,8 +24,8 @@ export const createAuth = (env: AuthEnv) => {
    * stick, so it keeps the Lax default.
    */
   const cookieAttributes = env.BETTER_AUTH_URL.startsWith("https://")
-    ? { sameSite: "none", secure: true, partitioned: true } as const
-    : { sameSite: "lax", secure: false } as const;
+    ? ({ sameSite: "none", secure: true, partitioned: true } as const)
+    : ({ sameSite: "lax", secure: false } as const);
 
   return betterAuth({
     database: drizzleAdapter(db, {
@@ -97,8 +97,7 @@ export const createAuth = (env: AuthEnv) => {
             if (!row || row.banned) {
               throw new APIError("FORBIDDEN", {
                 code: "BANNED_USER",
-                message:
-                  "This account has been deactivated. Ask the vendor team to reactivate it.",
+                message: "This account has been deactivated. Ask the vendor team to reactivate it.",
               });
             }
             if (row.organizationId !== null) {

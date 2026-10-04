@@ -1285,7 +1285,9 @@ describe("admin.product", () => {
 
     const create = router.admin.product.create.callable({ context: adminContext(fake) });
 
-    await expect(create({ name: "Line 9 Controller", slug: "line-9-controller" })).rejects.toMatchObject({
+    await expect(
+      create({ name: "Line 9 Controller", slug: "line-9-controller" }),
+    ).rejects.toMatchObject({
       code: "CONFLICT",
     });
   });
@@ -1321,15 +1323,15 @@ describe("admin.user.createClient", () => {
     fake.queueRows([]);
     fake.queueRows([]);
     fake.queueRows([
-        userRow({
-          id: "client-new",
-          name: "Hank Scorpio",
-          email: "hank@globex.test",
-          role: "client",
-          organizationId: "org-new",
-          organizationName: "Globex Corporation",
-        }),
-      ]);
+      userRow({
+        id: "client-new",
+        name: "Hank Scorpio",
+        email: "hank@globex.test",
+        role: "client",
+        organizationId: "org-new",
+        organizationName: "Globex Corporation",
+      }),
+    ]);
 
     const create = router.admin.user.createClient.callable({ context: adminContext(fake) });
     const result = await create(validInput);
@@ -1358,8 +1360,8 @@ describe("admin.user.createClient", () => {
 
     const create = router.admin.user.createClient.callable({ context: adminContext(fake) });
 
-    await expect(
-      create({ ...validInput, productIds: ["prod-ghost"] }),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(create({ ...validInput, productIds: ["prod-ghost"] })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
   });
 });
