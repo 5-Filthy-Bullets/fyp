@@ -1,64 +1,57 @@
-import { authClient } from "@/auth";
 import { useCaller } from "@/lib/session";
 import { AppShell } from "@/components/app-shell";
 import { SessionGuard } from "@/components/auth-guard";
-import { PageHeader } from "@/components/page-header";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardHeader, CardPanel, CardTitle } from "@/components/ui/card";
-import { House } from "lucide-react";
+import { AdminDashboard } from "@/components/admin-dashboard";
+import { ClientDashboard } from "@/components/client-dashboard";
+import { TechnicianDashboard } from "@/components/technician-dashboard";
+import { Card, CardPanel } from "@/components/ui/card";
 
 /**
- * Signed-in landing page inside the app shell. The card stays a placeholder
- * until Phase 4; the shell, guard, and role badge behavior are the real work.
+ * Signed-in landing page inside the app shell. Renders the dashboard matching
+ * the caller's role; each dashboard owns its header and queries.
  */
 export function HomePage() {
   return (
     <SessionGuard mode="signed-in">
       <AppShell>
-        <HomePlaceholder />
+        <DashboardSwitch />
       </AppShell>
     </SessionGuard>
   );
 }
 
-function HomePlaceholder() {
-  const { email, role } = useCaller();
+function DashboardSwitch() {
+  const { role, session } = useCaller();
 
-  const signOut = async () => {
-    await authClient.signOut();
-  };
-
-  return (
-    <div className="grid gap-6">
-      <PageHeader
-        title="Home"
-        description={`Signed in as ${email ?? "unknown"}. Your workspace opens here in a later phase.`}
-        icon={House}
-      />
+  if (session.isPending) {
+    return (
       <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <CardTitle>Support tickets</CardTitle>
-            {role !== undefined && <Badge variant="secondary">{role}</Badge>}
-          </div>
-          <CardDescription>
-            This card is a placeholder. Pick your section from the sidebar once Phase 4 lands the
-            real pages.
-          </CardDescription>
-        </CardHeader>
-        <CardPanel className="grid gap-4">
-          <p className="text-sm text-muted-foreground">
-            Nothing to do here yet. The sidebar, search, theme toggle, and account menu above are
-            live.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={signOut}>
-              Sign out
-            </Button>
-          </div>
+        <CardPanel>
+          <p className="text-sm text-muted-foreground">Loading dashboard…</p>
         </CardPanel>
       </Card>
-    </div>
+    );
+  }
+
+  if (role === "client") {
+    return <ClientDashboard />;
+  }
+
+  if (role === "technician") {
+    return <TechnicianDashboard />;
+  }
+
+  if (role === "admin") {
+    return <AdminDashboard />;
+  }
+
+  return (
+    <Card>
+      <CardPanel>
+        <p className="text-sm text-muted-foreground" role="alert">
+          Your account has an unusable role. Ask the vendor team to fix it.
+        </p>
+      </CardPanel>
+    </Card>
   );
 }

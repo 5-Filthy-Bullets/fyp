@@ -63,8 +63,8 @@ const shellTitle: Record<Role, string> = {
 /**
  * Coss-style app shell: collapsible left sidebar with per-role nav, topbar
  * with search, theme toggle, notification bell stub, and avatar menu. All
- * links point at "/" until Phase 4 lands the real routes; the nav filters by
- * role so each portal only sees its own entries.
+ * links point at "/" until Phase 5 lands the ticket list/detail pages; the
+ * nav filters by role so each portal only sees its own entries.
  */
 export function AppShell({ children }: { readonly children: ReactNode }) {
   const { role } = useCaller();
@@ -284,7 +284,7 @@ function Topbar({
 
 /**
  * Global ticket search. The ticket list does not exist yet, so the query is
- * parked in the URL (`?q=`) where the list reads it once Phase 4 lands.
+ * parked in the URL (`?q=`) where the list reads it once Phase 5 lands.
  */
 function SearchBox() {
   const [value, setValue] = useState("");
@@ -339,7 +339,7 @@ function ThemeToggleButton() {
   );
 }
 
-/** Placeholder bell. Phase 4 wires it to the notifications query. */
+/** Placeholder bell. A later phase wires it to the notifications query. */
 function NotificationBell() {
   return (
     <Button variant="ghost" size="icon-sm" aria-label="Notifications" title="Notifications">

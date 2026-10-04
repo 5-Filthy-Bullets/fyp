@@ -187,6 +187,24 @@ export const ticketRouter = {
       return { ticket: toTicketOutput(saved) };
     }),
 
+  listMine: clientProcedure
+    .route({
+      method: "GET",
+      path: "/tickets/mine",
+      summary: "List my organization's tickets",
+      description:
+        "Client inbox. Returns only the tickets filed under the caller's organization, newest first. The organization is taken from the session, so a client cannot read another org's tickets.",
+      tags: ["Tickets"],
+    })
+    .output(z.object({ tickets: z.array(ticketOutput) }))
+    .handler(async ({ context }) => {
+      const rows = await selectTickets(context.db, {
+        organizationId: context.caller.organizationId,
+      });
+
+      return { tickets: rows.map(toTicketOutput) };
+    }),
+
   list: staffProcedure
     .route({
       method: "GET",

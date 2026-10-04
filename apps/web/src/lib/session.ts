@@ -19,8 +19,8 @@ const roleHomes = {
 } as const satisfies Record<Role, "/">;
 
 /**
- * Landing page for a signed-in role. Every role lands on the "/" placeholder
- * until Phase 3 replaces it with real dashboards; then only this map changes.
+ * Landing page for a signed-in role. Every role lands on "/", where the
+ * Phase 4 dashboards render per role.
  */
 export const homePathForRole = (role: Role): "/" => roleHomes[role];
 
