@@ -222,6 +222,68 @@ describe("ticket.create", () => {
   });
 });
 
+describe("ticket.listMine", () => {
+  it("returns only the caller's organization, scoped from the session", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([ticketRow()]);
+
+    const listMine = router.ticket.listMine.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Dana Okafor",
+          role: "client",
+          organizationId: "org-acme",
+        }),
+        db: fake.db,
+      },
+    });
+
+    const { tickets } = await listMine({});
+
+    expect(tickets).toHaveLength(1);
+    expect(tickets[0]?.organizationId).toBe("org-acme");
+    // The org filter comes from the session, never from input.
+    expect(fake.queries[0]?.params).toContain("org-acme");
+    expect(fake.queries[0]?.sql).toContain('order by "ticket"."created_at" desc');
+  });
+
+  it("refuses staff accounts, who use the full queue instead", async () => {
+    const listMine = router.ticket.listMine.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Toni Alvarez",
+          role: "technician",
+          organizationId: null,
+        }),
+        db: fakeDatabase().db,
+      },
+    });
+
+    await expect(listMine({})).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("refuses a client with no organization rather than running an unscoped query", async () => {
+    const fake = fakeDatabase();
+
+    const listMine = router.ticket.listMine.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Unlinked",
+          role: "client",
+          organizationId: null,
+        }),
+        db: fake.db,
+      },
+    });
+
+    await expect(listMine({})).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(fake.queries).toHaveLength(0);
+  });
+});
+
 describe("ticket.list", () => {
   it("returns the staff queue with org and product names resolved", async () => {
     const fake = fakeDatabase();

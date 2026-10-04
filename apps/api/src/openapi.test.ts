@@ -23,6 +23,7 @@ describe("openapi spec", () => {
       "/me",
       "/products",
       "/tickets",
+      "/tickets/mine",
       "/tickets/{ticketId}/status",
     ]);
   });
