@@ -108,6 +108,9 @@ importers:
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
+      zod:
+        specifier: ^4.5.4
+        version: 4.5.4
     devDependencies:
       '@orpc/server':
         specifier: ^1.15.0
