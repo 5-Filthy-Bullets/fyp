@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardPanel, CardTitle } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import { formatTicketDate, statusLabel } from "@/lib/tickets";
-import type { Ticket, TicketStatus } from "@/lib/tickets";
+import { formatTicketDate, priorityLabel, statusLabel } from "@/lib/tickets";
+import type { Ticket, TicketListSearch, TicketPriority, TicketStatus } from "@/lib/tickets";
 
 const statusVariants: Record<TicketStatus, "info" | "warning" | "success"> = {
   open: "info",
@@ -18,12 +18,23 @@ export function StatusBadge({ status }: { readonly status: TicketStatus }) {
   return <Badge variant={statusVariants[status]}>{statusLabel(status)}</Badge>;
 }
 
+const priorityVariants: Record<TicketPriority, "secondary" | "info" | "warning" | "error"> = {
+  low: "secondary",
+  normal: "info",
+  high: "warning",
+  urgent: "error",
+};
+
+export function PriorityBadge({ priority }: { readonly priority: TicketPriority }) {
+  return <Badge variant={priorityVariants[priority]}>{priorityLabel(priority)}</Badge>;
+}
+
 interface StatCardProps {
   readonly label: string;
   readonly value: number;
   readonly icon: LucideIcon;
-  readonly to: string;
-  readonly search?: Record<string, string>;
+  readonly to: "/" | "/tickets";
+  readonly search?: TicketListSearch;
 }
 
 /**
@@ -91,8 +102,7 @@ const recentRowGrid = "grid gap-1.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-c
 
 /**
  * Recent-activity table shared by dashboards: title, product/org meta line,
- * status badge, relative order newest first. Rows are plain (no detail route
- * until Phase 5), so the whole card links to the pre-filtered list instead.
+ * status badge, newest first. Rows link into the ticket detail page.
  */
 export function RecentTickets({
   title,
@@ -113,7 +123,7 @@ export function RecentTickets({
   readonly isError: boolean;
   readonly onRetry: () => void;
   readonly emptyMessage: string;
-  readonly footerTo?: string;
+  readonly footerTo?: "/" | "/tickets";
   readonly footerLabel?: string;
   readonly meta: (ticket: Ticket) => string;
 }) {
@@ -140,7 +150,13 @@ export function RecentTickets({
             {tickets.map((ticket) => (
               <li key={ticket.id} className={cn(recentRowGrid, "px-6 py-3.5")}>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{ticket.title}</p>
+                  <Link
+                    to="/tickets/$ticketId"
+                    params={{ ticketId: ticket.id }}
+                    className="block truncate text-sm font-medium text-primary hover:underline"
+                  >
+                    {ticket.title}
+                  </Link>
                   <p className="truncate text-xs text-muted-foreground">{meta(ticket)}</p>
                 </div>
                 <div className="flex items-center gap-2">
