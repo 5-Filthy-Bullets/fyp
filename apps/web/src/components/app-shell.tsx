@@ -1,4 +1,4 @@
-import { Link, useLocation } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { Menu } from "@base-ui/react/menu";
 import { Separator } from "@base-ui/react/separator";
 import {
@@ -41,12 +41,12 @@ interface NavItem {
 }
 const primaryNav: readonly NavItem[] = [
   { to: "/", label: "Home", icon: House, roles: ["client", "technician", "admin"] },
-  { to: "/", label: "My Tickets", icon: Ticket, roles: ["client"] },
-  { to: "/", label: "New Ticket", icon: TicketPlus, roles: ["client"] },
-  { to: "/", label: "Queue", icon: Inbox, roles: ["technician"] },
-  { to: "/", label: "My Work", icon: Wrench, roles: ["technician"] },
+  { to: "/tickets", label: "My Tickets", icon: Ticket, roles: ["client"] },
+  { to: "/tickets/new", label: "New Ticket", icon: TicketPlus, roles: ["client"] },
+  { to: "/tickets", label: "Queue", icon: Inbox, roles: ["technician"] },
+  { to: "/tickets", label: "My Work", icon: Wrench, roles: ["technician"] },
   { to: "/", label: "Dashboard", icon: LayoutDashboard, roles: ["admin"] },
-  { to: "/", label: "Escalated", icon: TriangleAlert, roles: ["admin"] },
+  { to: "/tickets", label: "Escalated", icon: TriangleAlert, roles: ["admin"] },
 ];
 
 const adminNav: readonly NavItem[] = [
@@ -62,8 +62,7 @@ const shellTitle: Record<Role, string> = {
 
 /**
  * Coss-style app shell: collapsible left sidebar with per-role nav, topbar
- * with search, theme toggle, notification bell stub, and avatar menu. All
- * links point at "/" until Phase 5 lands the ticket list/detail pages; the
+ * with search, theme toggle, notification bell stub, and avatar menu. The
  * nav filters by role so each portal only sees its own entries.
  */
 export function AppShell({ children }: { readonly children: ReactNode }) {
@@ -283,22 +282,29 @@ function Topbar({
 }
 
 /**
- * Global ticket search. The ticket list does not exist yet, so the query is
- * parked in the URL (`?q=`) where the list reads it once Phase 5 lands.
+ * Global ticket search, parked in ?q= on the ticket list route. Typing here
+ * jumps to /tickets so the list owns the filter.
  */
 function SearchBox() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [value, setValue] = useState("");
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const params = new URLSearchParams(window.location.search);
-    if (value.trim() === "") {
-      params.delete("q");
-    } else {
-      params.set("q", value.trim());
+    const trimmed = value.trim();
+    if (location.pathname.startsWith("/tickets")) {
+      void navigate({
+        to: "/tickets",
+        search: (prev) => (trimmed === "" ? { ...prev, q: undefined } : { ...prev, q: trimmed }),
+        replace: true,
+      });
+      return;
     }
-    const query = params.toString();
-    window.history.replaceState(null, "", query === "" ? "/" : `/?${query}`);
+    void navigate({
+      to: "/tickets",
+      search: trimmed === "" ? {} : { q: trimmed },
+    });
   };
 
   return (

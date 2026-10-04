@@ -35,26 +35,26 @@ export function TechnicianDashboard() {
         icon={Inbox}
       />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Queue" value={summary.total} icon={Inbox} to="/" search={{}} />
+        <StatCard label="Queue" value={summary.total} icon={Inbox} to="/tickets" search={{}} />
         <StatCard
           label="Open"
           value={summary.open}
           icon={CircleDashed}
-          to="/"
+          to="/tickets"
           search={{ status: "open" }}
         />
         <StatCard
           label="Unclaimed"
           value={summary.unclaimed}
           icon={Hand}
-          to="/"
+          to="/tickets"
           search={{ q: "unclaimed" }}
         />
         <StatCard
           label="In Progress"
           value={summary.inProgress}
           icon={LoaderCircle}
-          to="/"
+          to="/tickets"
           search={{ status: "in_progress" }}
         />
       </div>
@@ -154,7 +154,7 @@ export function TechnicianDashboard() {
         isError={queue.isError}
         onRetry={() => void queue.refetch()}
         emptyMessage="No tickets in the queue yet."
-        footerTo="/"
+        footerTo="/tickets"
         footerLabel="View full queue"
         meta={(ticket) => `${ticket.organizationName} · ${ticket.productName}`}
       />

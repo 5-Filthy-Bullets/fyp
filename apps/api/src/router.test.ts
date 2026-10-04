@@ -4,6 +4,7 @@ import {
   authWithSession,
   authWithoutSession,
   fakeDatabase,
+  messageRow,
   sessionHeaders,
   ticketRow,
 } from "./router.testFixtures";
@@ -153,6 +154,7 @@ describe("ticket.create", () => {
     title: "Conveyor belt stops mid-cycle",
     description: "The line halts after roughly twenty minutes of runtime.",
     reporterName: "Dana Okafor",
+    priority: "high" as const,
   };
 
   it("files the ticket under the caller's organization and returns it", async () => {
@@ -167,16 +169,20 @@ describe("ticket.create", () => {
         validInput.description,
         validInput.reporterName,
         "open",
+        "high",
+        false,
         null,
         new Date("2026-03-04T09:15:00Z"),
       ],
     ]);
-    fake.queueRows([ticketRow({ title: validInput.title })]);
+    fake.queueRows([ticketRow({ title: validInput.title, priority: "high" })]);
 
     const create = router.ticket.create.callable({ context: clientContext(fake) });
     const result = await create(validInput);
 
     expect(result.ticket.status).toBe("open");
+    expect(result.ticket.priority).toBe("high");
+    expect(result.ticket.escalated).toBe(false);
     expect(result.ticket.organizationId).toBe("org-acme");
     expect(result.ticket.createdAt).toBe("2026-03-04T09:15:00.000Z");
     expect(fake.queries[1]?.params).toContain("org-acme");
@@ -391,6 +397,9 @@ describe("ticket.setStatus", () => {
         "The line halts after roughly twenty minutes of runtime.",
         "Dana Okafor",
         "in_progress",
+        "low",
+        false,
+        null,
         "test-user-id",
         new Date("2026-03-04T09:15:00Z"),
       ],
@@ -416,6 +425,9 @@ describe("ticket.setStatus", () => {
         "The line halts after roughly twenty minutes of runtime.",
         "Dana Okafor",
         "resolved",
+        "low",
+        false,
+        null,
         "other-technician-id",
         new Date("2026-03-04T09:15:00Z"),
       ],
@@ -429,6 +441,44 @@ describe("ticket.setStatus", () => {
     expect(fake.queries[0]?.sql).toContain("coalesce");
     expect(fake.queries[0]?.params).toContain("test-user-id");
     expect(ticket.assignedTo).toBe("other-technician-id");
+  });
+
+  it("updates only the priority when no status is passed", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([
+      [
+        "ticket-1",
+        "org-acme",
+        "prod-line-9",
+        "Conveyor belt stops mid-cycle",
+        "The line halts after roughly twenty minutes of runtime.",
+        "Dana Okafor",
+        "open",
+        "urgent",
+        false,
+        null,
+        "test-user-id",
+        new Date("2026-03-04T09:15:00Z"),
+      ],
+    ]);
+    fake.queueRows([ticketRow({ priority: "urgent", assignedTo: "test-user-id" })]);
+
+    const setStatus = router.ticket.setStatus.callable({ context: staffContext(fake) });
+    const { ticket } = await setStatus({ ticketId: "ticket-1", priority: "urgent" });
+
+    expect(ticket.priority).toBe("urgent");
+    expect(ticket.status).toBe("open");
+  });
+
+  it("rejects an update with neither status nor priority", async () => {
+    const fake = fakeDatabase();
+
+    const setStatus = router.ticket.setStatus.callable({ context: staffContext(fake) });
+
+    await expect(setStatus({ ticketId: "ticket-1" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    expect(fake.queries).toHaveLength(0);
   });
 
   it("reports a missing ticket as not found", async () => {
@@ -471,6 +521,411 @@ describe("ticket.setStatus", () => {
 
     await expect(setStatus({ ticketId: "ticket-1", status: "resolved" })).rejects.toMatchObject({
       code: "FORBIDDEN",
+    });
+  });
+});
+
+describe("ticket.assign", () => {
+  const staffContext = (fake: ReturnType<typeof fakeDatabase>) => ({
+    headers,
+    auth: authWithSession({
+      name: "Ada Admin",
+      role: "admin" as const,
+      organizationId: null,
+    }),
+    db: fake.db,
+  });
+
+  const assignedRow = (assignedTo: string) => ticketRow({ status: "open", assignedTo });
+
+  it("hands the ticket to a chosen technician", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([["tech-2", "technician"]]);
+    fake.queueRows([
+      [
+        "ticket-1",
+        "org-acme",
+        "prod-line-9",
+        "Conveyor belt stops mid-cycle",
+        "The line halts after roughly twenty minutes of runtime.",
+        "Dana Okafor",
+        "open",
+        "low",
+        false,
+        null,
+        "tech-2",
+        new Date("2026-03-04T09:15:00Z"),
+      ],
+    ]);
+    fake.queueRows([assignedRow("tech-2")]);
+
+    const assign = router.ticket.assign.callable({ context: staffContext(fake) });
+    const { ticket } = await assign({ ticketId: "ticket-1", assigneeId: "tech-2" });
+
+    expect(ticket.assignedTo).toBe("tech-2");
+    expect(fake.queries[0]?.params).toContain("tech-2");
+  });
+
+  it("rejects an assignee who is not a technician", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([["client-9", "client"]]);
+
+    const assign = router.ticket.assign.callable({ context: staffContext(fake) });
+
+    await expect(assign({ ticketId: "ticket-1", assigneeId: "client-9" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    expect(fake.queries).toHaveLength(1);
+  });
+
+  it("rejects an assignee who does not exist", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([]);
+
+    const assign = router.ticket.assign.callable({ context: staffContext(fake) });
+
+    await expect(
+      assign({ ticketId: "ticket-1", assigneeId: "tech-missing" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("refuses client accounts", async () => {
+    const assign = router.ticket.assign.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Dana Okafor",
+          role: "client",
+          organizationId: "org-acme",
+        }),
+        db: fakeDatabase().db,
+      },
+    });
+
+    await expect(assign({ ticketId: "ticket-1", assigneeId: "tech-2" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
+});
+
+describe("ticket.escalate", () => {
+  const staffContext = (fake: ReturnType<typeof fakeDatabase>) => ({
+    headers,
+    auth: authWithSession({
+      name: "Toni Alvarez",
+      role: "technician" as const,
+      organizationId: null,
+    }),
+    db: fake.db,
+  });
+
+  const reason = "Needs a replacement part before the line restarts.";
+
+  it("flags the ticket with the reason for admin review", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([
+      [
+        "ticket-1",
+        "org-acme",
+        "prod-line-9",
+        "Conveyor belt stops mid-cycle",
+        "The line halts after roughly twenty minutes of runtime.",
+        "Dana Okafor",
+        "open",
+        "low",
+        true,
+        reason,
+        null,
+        new Date("2026-03-04T09:15:00Z"),
+      ],
+    ]);
+    fake.queueRows([ticketRow({ escalated: true, escalatedReason: reason })]);
+
+    const escalate = router.ticket.escalate.callable({ context: staffContext(fake) });
+    const { ticket } = await escalate({ ticketId: "ticket-1", reason });
+
+    expect(ticket.escalated).toBe(true);
+    expect(ticket.escalatedReason).toBe(reason);
+    expect(fake.queries[0]?.params).toContain(reason);
+  });
+
+  it("rejects a reason too short to act on", async () => {
+    const escalate = router.ticket.escalate.callable({
+      context: staffContext(fakeDatabase()),
+    });
+
+    await expect(escalate({ ticketId: "ticket-1", reason: "no" })).rejects.toThrow();
+  });
+
+  it("reports a missing ticket as not found", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([]);
+
+    const escalate = router.ticket.escalate.callable({ context: staffContext(fake) });
+
+    await expect(escalate({ ticketId: "ticket-missing", reason })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+  });
+
+  it("refuses client accounts", async () => {
+    const escalate = router.ticket.escalate.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Dana Okafor",
+          role: "client",
+          organizationId: "org-acme",
+        }),
+        db: fakeDatabase().db,
+      },
+    });
+
+    await expect(escalate({ ticketId: "ticket-1", reason })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
+});
+
+describe("ticket.get", () => {
+  it("returns the ticket with public and internal messages for staff", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([ticketRow()]);
+    fake.queueRows([
+      messageRow({ id: "message-1", visibility: "public" }),
+      messageRow({ id: "message-2", visibility: "internal" }),
+    ]);
+
+    const get = router.ticket.get.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Toni Alvarez",
+          role: "technician",
+          organizationId: null,
+        }),
+        db: fake.db,
+      },
+    });
+
+    const result = await get({ ticketId: "ticket-1" });
+
+    expect(result.ticket.id).toBe("ticket-1");
+    expect(result.messages).toHaveLength(2);
+    // Staff read every message, so no visibility value is bound as a filter.
+    expect(fake.queries[1]?.params).not.toContain("public");
+  });
+
+  it("shows only public messages to the owning client", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([ticketRow()]);
+    fake.queueRows([messageRow({ id: "message-1", visibility: "public" })]);
+
+    const get = router.ticket.get.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Dana Okafor",
+          role: "client",
+          organizationId: "org-acme",
+        }),
+        db: fake.db,
+      },
+    });
+
+    const result = await get({ ticketId: "ticket-1" });
+
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]?.visibility).toBe("public");
+    expect(fake.queries[1]?.sql).toContain("visibility");
+    expect(fake.queries[1]?.params).toContain("public");
+  });
+
+  it("hides other-org tickets from clients as not found", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([ticketRow({ organizationId: "org-other" })]);
+
+    const get = router.ticket.get.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Dana Okafor",
+          role: "client",
+          organizationId: "org-acme",
+        }),
+        db: fake.db,
+      },
+    });
+
+    await expect(get({ ticketId: "ticket-1" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    // The message query never runs once the org check fails.
+    expect(fake.queries).toHaveLength(1);
+  });
+
+  it("reports a missing ticket as not found", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([]);
+
+    const get = router.ticket.get.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Toni Alvarez",
+          role: "technician",
+          organizationId: null,
+        }),
+        db: fake.db,
+      },
+    });
+
+    await expect(get({ ticketId: "ticket-missing" })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+  });
+});
+
+describe("ticket.postMessage", () => {
+  const clientContext = (fake: ReturnType<typeof fakeDatabase>) => ({
+    headers,
+    auth: authWithSession({
+      name: "Dana Okafor",
+      role: "client" as const,
+      organizationId: "org-acme",
+    }),
+    db: fake.db,
+  });
+
+  const staffContext = (fake: ReturnType<typeof fakeDatabase>) => ({
+    headers,
+    auth: authWithSession({
+      name: "Toni Alvarez",
+      role: "technician" as const,
+      organizationId: null,
+    }),
+    db: fake.db,
+  });
+
+  it("saves a public client reply on the caller's own ticket", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([ticketRow()]);
+    fake.queueRows([
+      [
+        "message-1",
+        "ticket-1",
+        "test-user-id",
+        "The line is still down.",
+        "public",
+        new Date("2026-03-04T10:00:00Z"),
+      ],
+    ]);
+
+    const postMessage = router.ticket.postMessage.callable({ context: clientContext(fake) });
+    const { message } = await postMessage({
+      ticketId: "ticket-1",
+      content: "The line is still down.",
+    });
+
+    expect(message.visibility).toBe("public");
+    expect(message.content).toBe("The line is still down.");
+  });
+
+  it("lets staff post an internal note", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([ticketRow()]);
+    fake.queueRows([
+      [
+        "message-2",
+        "ticket-1",
+        "test-user-id",
+        "Waiting on parts.",
+        "internal",
+        new Date("2026-03-04T10:05:00Z"),
+      ],
+    ]);
+
+    const postMessage = router.ticket.postMessage.callable({ context: staffContext(fake) });
+    const { message } = await postMessage({
+      ticketId: "ticket-1",
+      content: "Waiting on parts.",
+      visibility: "internal",
+    });
+
+    expect(message.visibility).toBe("internal");
+  });
+
+  it("refuses an internal note from a client", async () => {
+    const fake = fakeDatabase();
+
+    const postMessage = router.ticket.postMessage.callable({ context: clientContext(fake) });
+
+    await expect(
+      postMessage({ ticketId: "ticket-1", content: "Sneaky note.", visibility: "internal" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(fake.queries).toHaveLength(0);
+  });
+
+  it("hides other-org tickets from clients as not found", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([ticketRow({ organizationId: "org-other" })]);
+
+    const postMessage = router.ticket.postMessage.callable({ context: clientContext(fake) });
+
+    await expect(postMessage({ ticketId: "ticket-1", content: "Hello?" })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+  });
+
+  it("rejects an empty reply", async () => {
+    const postMessage = router.ticket.postMessage.callable({
+      context: clientContext(fakeDatabase()),
+    });
+
+    await expect(postMessage({ ticketId: "ticket-1", content: "   " })).rejects.toThrow();
+  });
+});
+
+describe("ticket.listMessages", () => {
+  it("shows only public messages to the owning client", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([ticketRow()]);
+    fake.queueRows([messageRow({ visibility: "public" })]);
+
+    const listMessages = router.ticket.listMessages.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Dana Okafor",
+          role: "client",
+          organizationId: "org-acme",
+        }),
+        db: fake.db,
+      },
+    });
+
+    const { messages } = await listMessages({ ticketId: "ticket-1" });
+
+    expect(messages).toHaveLength(1);
+    expect(fake.queries[1]?.params).toContain("public");
+  });
+
+  it("hides other-org tickets from clients as not found", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([ticketRow({ organizationId: "org-other" })]);
+
+    const listMessages = router.ticket.listMessages.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Dana Okafor",
+          role: "client",
+          organizationId: "org-acme",
+        }),
+        db: fake.db,
+      },
+    });
+
+    await expect(listMessages({ ticketId: "ticket-1" })).rejects.toMatchObject({
+      code: "NOT_FOUND",
     });
   });
 });
