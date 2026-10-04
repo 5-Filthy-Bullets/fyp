@@ -10,6 +10,15 @@ export const userRole = pgEnum("user_role", ["admin", "technician", "client"]);
 
 export const ticketStatus = pgEnum("ticket_status", ["open", "in_progress", "resolved"]);
 
+/** Filing urgency, set by the client and adjustable by staff. */
+export const ticketPriority = pgEnum("ticket_priority", ["low", "normal", "high", "urgent"]);
+
+/**
+ * Who may read a ticket message. Clients only ever see `public` replies;
+ * `internal` notes stay inside vendor staff.
+ */
+export const messageVisibility = pgEnum("message_visibility", ["public", "internal"]);
+
 /** A client company that buys from the vendor. */
 export const organization = pgTable("organization", {
   id: text("id").primaryKey(),
@@ -66,10 +75,32 @@ export const ticket = pgTable("ticket", {
   description: text("description").notNull(),
   reporterName: text("reporter_name").notNull(),
   status: ticketStatus("status").notNull().default("open"),
+  priority: ticketPriority("priority").notNull().default("low"),
+  /** Set by staff when a ticket needs admin review, with the reason kept alongside. */
+  escalated: boolean("escalated").notNull().default(false),
+  escalatedReason: text("escalated_reason"),
   /** Set when a technician or admin claims the ticket. */
   assignedTo: text("assigned_to").references(() => user.id, {
     onDelete: "set null",
   }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/**
+ * Replies and staff notes on a ticket, oldest first. The author is nullable
+ * with set-null so deleting an account never deletes the conversation that
+ * account took part in.
+ */
+export const ticketMessage = pgTable("ticket_message", {
+  id: text("id").primaryKey(),
+  ticketId: text("ticket_id")
+    .notNull()
+    .references(() => ticket.id, { onDelete: "cascade" }),
+  authorId: text("author_id").references(() => user.id, {
+    onDelete: "set null",
+  }),
+  content: text("content").notNull(),
+  visibility: messageVisibility("visibility").notNull().default("public"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -123,6 +154,7 @@ export const appSchema = {
   product,
   orgProduct,
   ticket,
+  ticketMessage,
 };
 
 export type UserId = string & { readonly __brand: "UserId" };
