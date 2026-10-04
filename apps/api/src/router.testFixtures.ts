@@ -103,6 +103,9 @@ export const ticketColumns = [
   "description",
   "reporterName",
   "status",
+  "priority",
+  "escalated",
+  "escalatedReason",
   "organizationId",
   "organizationName",
   "productId",
@@ -121,6 +124,9 @@ export const ticketRow = (
     description: "The line halts after roughly twenty minutes of runtime.",
     reporterName: "Dana Okafor",
     status: "open",
+    priority: "low",
+    escalated: false,
+    escalatedReason: null,
     organizationId: "org-acme",
     organizationName: "Acme Manufacturing",
     productId: "prod-line-9",
@@ -131,6 +137,25 @@ export const ticketRow = (
   };
 
   return ticketColumns.map((column) => values[column]);
+};
+
+/** Column order of the message select, for positional fake rows. */
+export const messageColumns = ["id", "authorId", "content", "visibility", "createdAt"] as const;
+
+/** Builds a fake message row in the order the router selects the columns. */
+export const messageRow = (
+  overrides: Partial<Record<(typeof messageColumns)[number], unknown>> = {},
+): readonly unknown[] => {
+  const values: Record<(typeof messageColumns)[number], unknown> = {
+    id: "message-1",
+    authorId: "test-user-id",
+    content: "Looking into the controller logs now.",
+    visibility: "public",
+    createdAt: new Date("2026-03-04T10:00:00Z"),
+    ...overrides,
+  };
+
+  return messageColumns.map((column) => values[column]);
 };
 
 export type { RouterSession };

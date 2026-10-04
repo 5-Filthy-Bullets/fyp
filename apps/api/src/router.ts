@@ -1,10 +1,21 @@
 import { ORPCError, os } from "@orpc/server";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { readCaller, requireClientCaller, requireStaffCaller, type Caller } from "./access";
 import type { Auth } from "./auth";
 import type { Database } from "./db/client";
-import { organization, orgProduct, product, ticket, ticketStatus, userRole } from "./db/schema";
+import {
+  messageVisibility,
+  organization,
+  orgProduct,
+  product,
+  ticket,
+  ticketMessage,
+  ticketPriority,
+  ticketStatus,
+  user,
+  userRole,
+} from "./db/schema";
 
 /** Session value the router reads, inferred from the real Auth type. */
 export type RouterSession = Auth["$Infer"]["Session"];
@@ -73,12 +84,31 @@ const ticketOutput = z.object({
   description: z.string().describe("Full detail from the reporter"),
   reporterName: z.string().describe("Name of the person who filed it"),
   status: z.enum(ticketStatus.enumValues).describe("Current ticket status"),
+  priority: z.enum(ticketPriority.enumValues).describe("Filing urgency, adjustable by staff"),
+  escalated: z.boolean().describe("True once staff flag the ticket for admin review"),
+  escalatedReason: z
+    .string()
+    .nullable()
+    .describe("Why the ticket was escalated, null until escalated"),
   organizationId: z.string().describe("Owning client organization id"),
   organizationName: z.string().describe("Owning client organization name"),
   productId: z.string().describe("Product the ticket is about"),
   productName: z.string().describe("Product display name"),
   assignedTo: z.string().nullable().describe("Staff user id, null when unclaimed"),
   createdAt: z.string().describe("ISO 8601 creation timestamp"),
+});
+
+const messageOutput = z.object({
+  id: z.string().describe("Message id"),
+  authorId: z.string().nullable().describe("Author user id, null when the account is gone"),
+  content: z.string().describe("Reply or note text"),
+  visibility: z.enum(messageVisibility.enumValues).describe("public replies vs staff-only notes"),
+  createdAt: z.string().describe("ISO 8601 creation timestamp"),
+});
+
+const ticketDetailOutput = z.object({
+  ticket: ticketOutput,
+  messages: z.array(messageOutput).describe("Replies oldest first, visibility-filtered by role"),
 });
 
 export const productRouter = {
@@ -134,6 +164,10 @@ export const ticketRouter = {
           .min(2)
           .max(80)
           .describe("Name of the person reporting the problem"),
+        priority: z
+          .enum(ticketPriority.enumValues)
+          .default("low")
+          .describe("Filing urgency, low unless the reporter says otherwise"),
       }),
     )
     .output(z.object({ ticket: ticketOutput }))
@@ -166,6 +200,7 @@ export const ticketRouter = {
           title: input.title,
           description: input.description,
           reporterName: input.reporterName,
+          priority: input.priority,
         })
         .returning();
 
@@ -211,7 +246,7 @@ export const ticketRouter = {
       path: "/tickets",
       summary: "List tickets across all client organizations",
       description:
-        "Vendor staff queue. Returns every ticket newest first with the org and product resolved. Pass organizationId to narrow to one client.",
+        "Vendor staff queue. Returns every ticket newest first with the org and product resolved. Pass organizationId to narrow to one client, and escalatedOnly to show only the tickets flagged for admin review.",
       tags: ["Tickets"],
     })
     .input(
@@ -221,38 +256,56 @@ export const ticketRouter = {
           .min(1)
           .optional()
           .describe("Optional client organization filter"),
+        escalatedOnly: z.boolean().optional().describe("Only tickets escalated for admin review"),
       }),
     )
     .output(z.object({ tickets: z.array(ticketOutput) }))
     .handler(async ({ context, input }) => {
       const rows = await selectTickets(context.db, {
         ...(input.organizationId === undefined ? {} : { organizationId: input.organizationId }),
+        ...(input.escalatedOnly === true ? { escalatedOnly: true } : {}),
       });
 
       return { tickets: rows.map(toTicketOutput) };
     }),
 
+  /**
+   * One endpoint for the detail page's right-rail actions: an optional
+   * status move plus an optional priority change in one write. The claim
+   * behavior stays untouched: whoever is already assigned keeps the ticket.
+   */
   setStatus: staffProcedure
     .route({
       method: "PATCH",
       path: "/tickets/{ticketId}/status",
-      summary: "Claim a ticket or change its status",
+      summary: "Claim a ticket, change its status, or adjust its priority",
       description:
-        "Moves a ticket to a new status. Claims an unassigned ticket for the caller, and leaves an existing owner alone so a second technician cannot silently steal a claimed ticket. There are no status-transition guards, so any status can move to any other.",
+        "Moves a ticket to a new status and optionally changes its priority. Claims an unassigned ticket for the caller, and leaves an existing owner alone so a second technician cannot silently steal a claimed ticket. There are no status-transition guards, so any status can move to any other.",
       tags: ["Tickets"],
     })
     .input(
       z.object({
         ticketId: z.string().min(1).describe("Ticket to update"),
-        status: z.enum(ticketStatus.enumValues).describe("Status to move the ticket to"),
+        status: z.enum(ticketStatus.enumValues).optional().describe("Status to move the ticket to"),
+        priority: z
+          .enum(ticketPriority.enumValues)
+          .optional()
+          .describe("Priority to set on the ticket"),
       }),
     )
     .output(z.object({ ticket: ticketOutput }))
     .handler(async ({ context, input }) => {
+      if (input.status === undefined && input.priority === undefined) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "Pass a status, a priority, or both.",
+        });
+      }
+
       const [updated] = await context.db
         .update(ticket)
         .set({
-          status: input.status,
+          ...(input.status === undefined ? {} : { status: input.status }),
+          ...(input.priority === undefined ? {} : { priority: input.priority }),
           // Fills an empty slot only. Overwriting would let whoever touched the
           // status last silently take over a ticket someone else already claimed.
           assignedTo: sql`coalesce(${ticket.assignedTo}, ${context.caller.userId})`,
@@ -277,15 +330,268 @@ export const ticketRouter = {
 
       return { ticket: toTicketOutput(changed) };
     }),
+
+  assign: staffProcedure
+    .route({
+      method: "PATCH",
+      path: "/tickets/{ticketId}/assignee",
+      summary: "Assign a ticket to a technician",
+      description:
+        "Explicitly hands a ticket to a chosen technician. The assignee must be a vendor staff account with the technician role, so a client or admin account cannot end up owning queue work.",
+      tags: ["Tickets"],
+    })
+    .input(
+      z.object({
+        ticketId: z.string().min(1).describe("Ticket to assign"),
+        assigneeId: z.string().min(1).describe("Technician user id to own the ticket"),
+      }),
+    )
+    .output(z.object({ ticket: ticketOutput }))
+    .handler(async ({ context, input }) => {
+      const [assignee] = await context.db
+        .select({ id: user.id, role: user.role })
+        .from(user)
+        .where(eq(user.id, input.assigneeId))
+        .limit(1);
+
+      if (!assignee || assignee.role !== "technician") {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "That account is not a technician.",
+        });
+      }
+
+      const [updated] = await context.db
+        .update(ticket)
+        .set({ assignedTo: input.assigneeId })
+        .where(eq(ticket.id, input.ticketId))
+        .returning();
+
+      if (!updated) {
+        throw new ORPCError("NOT_FOUND", {
+          message: "That ticket does not exist.",
+        });
+      }
+
+      const rows = await selectTickets(context.db, { ticketId: input.ticketId });
+      const changed = rows[0];
+
+      if (!changed) {
+        throw new ORPCError("INTERNAL_SERVER_ERROR", {
+          message: "The ticket was updated but could not be read back.",
+        });
+      }
+
+      return { ticket: toTicketOutput(changed) };
+    }),
+
+  escalate: staffProcedure
+    .route({
+      method: "PATCH",
+      path: "/tickets/{ticketId}/escalation",
+      summary: "Flag a ticket for admin review",
+      description:
+        "Marks a ticket escalated with a short reason. The admin dashboard's escalated view reads this flag, so a raised ticket shows up there immediately.",
+      tags: ["Tickets"],
+    })
+    .input(
+      z.object({
+        ticketId: z.string().min(1).describe("Ticket to escalate"),
+        reason: z.string().trim().min(3).max(500).describe("Why the ticket needs admin review"),
+      }),
+    )
+    .output(z.object({ ticket: ticketOutput }))
+    .handler(async ({ context, input }) => {
+      const [updated] = await context.db
+        .update(ticket)
+        .set({ escalated: true, escalatedReason: input.reason })
+        .where(eq(ticket.id, input.ticketId))
+        .returning();
+
+      if (!updated) {
+        throw new ORPCError("NOT_FOUND", {
+          message: "That ticket does not exist.",
+        });
+      }
+
+      const rows = await selectTickets(context.db, { ticketId: input.ticketId });
+      const changed = rows[0];
+
+      if (!changed) {
+        throw new ORPCError("INTERNAL_SERVER_ERROR", {
+          message: "The ticket was updated but could not be read back.",
+        });
+      }
+
+      return { ticket: toTicketOutput(changed) };
+    }),
+
+  /**
+   * The detail page's single read: ticket plus its messages, with the message
+   * list filtered by caller role. Clients 404 on other-org tickets so the
+   * response never leaks that a ticket exists.
+   */
+  get: callerProcedure
+    .route({
+      method: "GET",
+      path: "/tickets/{ticketId}",
+      summary: "Read one ticket with its messages",
+      description:
+        "Ticket detail. Returns the ticket plus its message thread oldest first. Staff see every message; clients see only public replies. Clients asking for another org's ticket get not-found rather than forbidden, so the response never leaks that the ticket exists.",
+      tags: ["Tickets"],
+    })
+    .input(z.object({ ticketId: z.string().min(1).describe("Ticket to read") }))
+    .output(ticketDetailOutput)
+    .handler(async ({ context, input }) => {
+      const rows = await selectTickets(context.db, { ticketId: input.ticketId });
+      const found = rows[0];
+
+      if (!found) {
+        throw new ORPCError("NOT_FOUND", {
+          message: "That ticket does not exist.",
+        });
+      }
+
+      const caller = context.caller;
+      const isStaff = caller.role === "admin" || caller.role === "technician";
+
+      if (!isStaff && found.organizationId !== caller.organizationId) {
+        throw new ORPCError("NOT_FOUND", {
+          message: "That ticket does not exist.",
+        });
+      }
+
+      const visibility = isStaff ? undefined : { visibility: "public" as const };
+      const messages = await selectMessages(context.db, {
+        ticketId: input.ticketId,
+        ...visibility,
+      });
+
+      return { ticket: toTicketOutput(found), messages };
+    }),
+
+  listMessages: callerProcedure
+    .route({
+      method: "GET",
+      path: "/tickets/{ticketId}/messages",
+      summary: "List messages on a ticket",
+      description:
+        "Message thread oldest first. Staff see every message including internal notes; clients see only public replies. Clients asking for another org's ticket get not-found rather than forbidden.",
+      tags: ["Tickets"],
+    })
+    .input(z.object({ ticketId: z.string().min(1).describe("Ticket to read") }))
+    .output(z.object({ messages: z.array(messageOutput) }))
+    .handler(async ({ context, input }) => {
+      const found = await loadTicketForCaller(context.db, context.caller, input.ticketId);
+      const isStaff = context.caller.role === "admin" || context.caller.role === "technician";
+
+      const messages = await selectMessages(context.db, {
+        ticketId: found.id,
+        ...(isStaff ? {} : { visibility: "public" as const }),
+      });
+
+      return { messages };
+    }),
+
+  postMessage: callerProcedure
+    .route({
+      method: "POST",
+      path: "/tickets/{ticketId}/messages",
+      summary: "Reply on a ticket",
+      description:
+        "Posts a public reply or, for staff only, an internal note. Clients can only touch their own org's tickets; posting internal as a client is rejected.",
+      tags: ["Tickets"],
+      successStatus: 201,
+    })
+    .input(
+      z.object({
+        ticketId: z.string().min(1).describe("Ticket to reply to"),
+        content: z.string().trim().min(1).max(4000).describe("Reply or note text"),
+        visibility: z
+          .enum(messageVisibility.enumValues)
+          .default("public")
+          .describe("public reply or internal staff note"),
+      }),
+    )
+    .output(z.object({ message: messageOutput }))
+    .handler(async ({ context, input }) => {
+      const caller = context.caller;
+      const isStaff = caller.role === "admin" || caller.role === "technician";
+
+      if (!isStaff && input.visibility === "internal") {
+        throw new ORPCError("FORBIDDEN", {
+          message: "Only vendor staff can post internal notes.",
+        });
+      }
+
+      await loadTicketForCaller(context.db, caller, input.ticketId);
+
+      const [created] = await context.db
+        .insert(ticketMessage)
+        .values({
+          id: crypto.randomUUID(),
+          ticketId: input.ticketId,
+          authorId: caller.userId,
+          content: input.content,
+          visibility: input.visibility,
+        })
+        .returning();
+
+      if (!created) {
+        throw new ORPCError("INTERNAL_SERVER_ERROR", {
+          message: "The reply could not be saved.",
+        });
+      }
+
+      return {
+        message: {
+          id: created.id,
+          authorId: created.authorId,
+          content: created.content,
+          visibility: created.visibility,
+          createdAt: created.createdAt.toISOString(),
+        },
+      };
+    }),
 };
 
 /**
- * Ticket filters for the single read path. The two optional keys are mutually
+ * Ticket filters for the single read path. The optional keys are mutually
  * independent; an empty filter is the full staff queue.
  */
 type TicketFilter = {
   readonly organizationId?: string;
   readonly ticketId?: string;
+  readonly escalatedOnly?: true;
+};
+
+/**
+ * Loads one ticket the caller is allowed to see. Clients asking for another
+ * org's ticket get NOT_FOUND, never FORBIDDEN, so the response never leaks
+ * that the ticket exists.
+ */
+const loadTicketForCaller = async (
+  db: Database,
+  caller: Caller,
+  ticketId: string,
+): Promise<TicketJoin> => {
+  const rows = await selectTickets(db, { ticketId });
+  const found = rows[0];
+
+  if (!found) {
+    throw new ORPCError("NOT_FOUND", {
+      message: "That ticket does not exist.",
+    });
+  }
+
+  const isStaff = caller.role === "admin" || caller.role === "technician";
+
+  if (!isStaff && found.organizationId !== caller.organizationId) {
+    throw new ORPCError("NOT_FOUND", {
+      message: "That ticket does not exist.",
+    });
+  }
+
+  return found;
 };
 
 /** Row shape straight from the join, before the wire conversion. */
@@ -295,6 +601,9 @@ type TicketJoin = {
   readonly description: string;
   readonly reporterName: string;
   readonly status: (typeof ticketStatus.enumValues)[number];
+  readonly priority: (typeof ticketPriority.enumValues)[number];
+  readonly escalated: boolean;
+  readonly escalatedReason: string | null;
   readonly organizationId: string;
   readonly organizationName: string;
   readonly productId: string;
@@ -310,6 +619,9 @@ const toTicketOutput = (row: TicketJoin) => ({
   description: row.description,
   reporterName: row.reporterName,
   status: row.status,
+  priority: row.priority,
+  escalated: row.escalated,
+  escalatedReason: row.escalatedReason,
   organizationId: row.organizationId,
   organizationName: row.organizationName,
   productId: row.productId,
@@ -325,6 +637,7 @@ const selectTickets = async (db: Database, filter: TicketFilter): Promise<Ticket
       ? []
       : [eq(ticket.organizationId, filter.organizationId)]),
     ...(filter.ticketId === undefined ? [] : [eq(ticket.id, filter.ticketId)]),
+    ...(filter.escalatedOnly === undefined ? [] : [eq(ticket.escalated, true)]),
   ];
 
   const base = db
@@ -334,6 +647,9 @@ const selectTickets = async (db: Database, filter: TicketFilter): Promise<Ticket
       description: ticket.description,
       reporterName: ticket.reporterName,
       status: ticket.status,
+      priority: ticket.priority,
+      escalated: ticket.escalated,
+      escalatedReason: ticket.escalatedReason,
       organizationId: ticket.organizationId,
       organizationName: organization.name,
       productId: ticket.productId,
@@ -347,6 +663,40 @@ const selectTickets = async (db: Database, filter: TicketFilter): Promise<Ticket
     .orderBy(desc(ticket.createdAt));
 
   return conditions.length > 0 ? base.where(and(...conditions)) : base;
+};
+
+/** Message filters for the thread read. Visibility unset means every message. */
+type MessageFilter = {
+  readonly ticketId: string;
+  readonly visibility?: "public";
+};
+
+/** Message thread oldest first, so the detail page reads like a conversation. */
+const selectMessages = async (db: Database, filter: MessageFilter) => {
+  const conditions = [
+    eq(ticketMessage.ticketId, filter.ticketId),
+    ...(filter.visibility === undefined ? [] : [eq(ticketMessage.visibility, filter.visibility)]),
+  ];
+
+  const rows = await db
+    .select({
+      id: ticketMessage.id,
+      authorId: ticketMessage.authorId,
+      content: ticketMessage.content,
+      visibility: ticketMessage.visibility,
+      createdAt: ticketMessage.createdAt,
+    })
+    .from(ticketMessage)
+    .where(and(...conditions))
+    .orderBy(asc(ticketMessage.createdAt));
+
+  return rows.map((row) => ({
+    id: row.id,
+    authorId: row.authorId,
+    content: row.content,
+    visibility: row.visibility,
+    createdAt: row.createdAt.toISOString(),
+  }));
 };
 
 export const router = {

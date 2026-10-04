@@ -24,6 +24,10 @@ describe("openapi spec", () => {
       "/products",
       "/tickets",
       "/tickets/mine",
+      "/tickets/{ticketId}",
+      "/tickets/{ticketId}/assignee",
+      "/tickets/{ticketId}/escalation",
+      "/tickets/{ticketId}/messages",
       "/tickets/{ticketId}/status",
     ]);
   });
