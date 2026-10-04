@@ -10,9 +10,11 @@
   },
   "dependencies": {
     "@orpc/client": "^1.15.0",
+    "@tailwindcss/vite": "^4.3.3",
     "better-auth": "^1.7.2",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "@orpc/server": "^1.15.0",
