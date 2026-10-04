@@ -19,11 +19,16 @@ export const ticketPriority = pgEnum("ticket_priority", ["low", "normal", "high"
  */
 export const messageVisibility = pgEnum("message_visibility", ["public", "internal"]);
 
-/** A client company that buys from the vendor. */
+/**
+ * A client company that buys from the vendor. Flipping `isActive` suspends
+ * the whole company: member sessions are dropped and the sign-in hook
+ * blocks new ones until an admin reactivates it.
+ */
 export const organization = pgTable("organization", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
+  isActive: boolean("is_active").notNull().default(true),
 });
 
 /** Something the vendor sells and the client can raise a ticket about. */
@@ -44,6 +49,14 @@ export const user = pgTable("user", {
   organizationId: text("organization_id").references(() => organization.id, {
     onDelete: "set null",
   }),
+  /**
+   * Deactivation flag owned by the better-auth admin plugin, which reads it
+   * on every sign-in and refuses banned accounts. The router also checks it
+   * in `readCaller`, so a banned session fails every RPC call too.
+   */
+  banned: boolean("banned").notNull().default(false),
+  banReason: text("ban_reason"),
+  banExpires: timestamp("ban_expires"),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
