@@ -9,6 +9,13 @@
 - Project uses better-auth for both AuthN and AuthZ.
 - Use zod for validation throughout the project.
 
+## Tests:
+
+- Audit existing tests before adding new ones. Remove tautological, redundant, implementation-coupled, and low-value tests.
+- Expected values must come from an independent source of truth, never echo mocked fixtures back. Assert on recorded writes (SQL, calls) for success paths, not on queued fake rows.
+- Prioritize behavioral coverage: each test must fail if the implementation is wrong (verify with mutation testing when in doubt).
+- Don't optimize for test count or coverage percentage.
+
 ## Guide:
 
 - Channel both "measure twice, cut once" and "yagni". Fight scope creep. Try to honor the dev's intent in both a minimal and realistic fashion.
