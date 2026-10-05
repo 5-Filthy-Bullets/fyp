@@ -290,6 +290,46 @@ describe("ticket.listMine", () => {
     await expect(listMine({})).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect(fake.queries).toHaveLength(0);
   });
+
+  it("refuses a banned client even with a live session", async () => {
+    const fake = fakeDatabase();
+    fake.queueBannedCaller();
+
+    const listMine = router.ticket.listMine.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Dana Okafor",
+          role: "client",
+          organizationId: "org-acme",
+        }),
+        db: fake.db,
+      },
+    });
+
+    await expect(listMine({})).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(fake.queries).toHaveLength(0);
+  });
+
+  it("refuses a client whose organization was suspended", async () => {
+    const fake = fakeDatabase();
+    fake.queueSuspendedOrg();
+
+    const listMine = router.ticket.listMine.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Dana Okafor",
+          role: "client",
+          organizationId: "org-acme",
+        }),
+        db: fake.db,
+      },
+    });
+
+    await expect(listMine({})).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(fake.queries).toHaveLength(0);
+  });
 });
 
 describe("ticket.list", () => {
@@ -374,6 +414,26 @@ describe("ticket.list", () => {
     });
 
     await expect(list({})).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("refuses a banned technician even with a live session", async () => {
+    const fake = fakeDatabase();
+    fake.queueBannedCaller();
+
+    const list = router.ticket.list.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Toni Alvarez",
+          role: "technician",
+          organizationId: null,
+        }),
+        db: fake.db,
+      },
+    });
+
+    await expect(list({})).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(fake.queries).toHaveLength(0);
   });
 });
 
@@ -542,7 +602,7 @@ describe("ticket.assign", () => {
 
   it("hands the ticket to a chosen technician", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([["tech-2", "technician"]]);
+    fake.queueRows([["tech-2", "technician", false]]);
     fake.queueRows([
       [
         "ticket-1",
@@ -570,7 +630,7 @@ describe("ticket.assign", () => {
 
   it("rejects an assignee who is not a technician", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([["client-9", "client"]]);
+    fake.queueRows([["client-9", "client", false]]);
 
     const assign = router.ticket.assign.callable({ context: staffContext(fake) });
 
@@ -589,6 +649,17 @@ describe("ticket.assign", () => {
     await expect(
       assign({ ticketId: "ticket-1", assigneeId: "tech-missing" }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("rejects a technician who has been deactivated", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([["tech-2", "technician", true]]);
+
+    const assign = router.ticket.assign.callable({ context: staffContext(fake) });
+
+    await expect(assign({ ticketId: "ticket-1", assigneeId: "tech-2" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
   });
 
   it("refuses client accounts", async () => {
@@ -762,6 +833,26 @@ describe("ticket.get", () => {
     await expect(get({ ticketId: "ticket-1" })).rejects.toMatchObject({ code: "NOT_FOUND" });
     // The message query never runs once the org check fails.
     expect(fake.queries).toHaveLength(1);
+  });
+
+  it("refuses a banned caller even with a live session", async () => {
+    const fake = fakeDatabase();
+    fake.queueBannedCaller();
+
+    const get = router.ticket.get.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Dana Okafor",
+          role: "client",
+          organizationId: "org-acme",
+        }),
+        db: fake.db,
+      },
+    });
+
+    await expect(get({ ticketId: "ticket-1" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(fake.queries).toHaveLength(0);
   });
 
   it("reports a missing ticket as not found", async () => {
@@ -979,12 +1070,12 @@ describe("admin guard", () => {
 
   it("fails closed when the admin account is banned behind its session", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[true]]);
+    fake.queueBannedCaller();
 
     const list = router.admin.user.list.callable({ context: adminContext(fake) });
 
     await expect(list({})).rejects.toMatchObject({ code: "FORBIDDEN" });
-    expect(fake.queries).toHaveLength(1);
+    expect(fake.queries).toHaveLength(0);
   });
 });
 
@@ -1001,7 +1092,6 @@ describe("admin.user.list", () => {
 
   it("returns technicians with the org name resolved", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[false]]);
     fake.queueRows([userRow(), userRow({ id: "user-2", email: "tech2@reliable.test" })]);
 
     const list = router.admin.user.list.callable({ context: adminContext(fake) });
@@ -1009,18 +1099,17 @@ describe("admin.user.list", () => {
 
     expect(result.total).toBe(2);
     expect(result.users[0]?.role).toBe("technician");
-    expect(fake.queries[1]?.sql).toContain("desc");
+    expect(fake.queries[0]?.sql).toContain("desc");
   });
 
   it("filters on name or email when a search is passed", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[false]]);
     fake.queueRows([userRow({ name: "Dana Okafor" })]);
 
     const list = router.admin.user.list.callable({ context: adminContext(fake) });
     await list({ search: "dana" });
 
-    expect(fake.queries[1]?.params).toContain("%dana%");
+    expect(fake.queries[0]?.params).toContain("%dana%");
   });
 });
 
@@ -1043,7 +1132,6 @@ describe("admin.user.createTechnician", () => {
 
   it("creates a technician with no organization", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[false]]);
     fake.queueRows([]);
     queueSignUpUser("tech-new");
     fake.queueRows([]);
@@ -1058,7 +1146,6 @@ describe("admin.user.createTechnician", () => {
 
   it("reports a duplicate email as conflict before touching auth", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[false]]);
     fake.queueRows([["tech-taken"]]);
 
     const create = router.admin.user.createTechnician.callable({ context: adminContext(fake) });
@@ -1088,7 +1175,6 @@ describe("admin.user.update", () => {
 
   it("renames a technician", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[false]]);
     fake.queueRows([["tech-1", "technician"]]);
     fake.queueRows([]);
     fake.queueRows([userRow({ id: "tech-1", name: "Renamed Tech" })]);
@@ -1101,7 +1187,6 @@ describe("admin.user.update", () => {
 
   it("refuses to touch admin accounts", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[false]]);
     fake.queueRows([["admin-1", "admin"]]);
 
     const update = router.admin.user.update.callable({ context: adminContext(fake) });
@@ -1113,7 +1198,6 @@ describe("admin.user.update", () => {
 
   it("rejects an update with nothing to change", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[false]]);
 
     const update = router.admin.user.update.callable({ context: adminContext(fake) });
 
@@ -1134,7 +1218,6 @@ describe("admin.user.setActive", () => {
 
   it("bans the account and drops its sessions", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[false]]);
     fake.queueRows([["tech-1", "technician"]]);
     fake.queueRows([]);
     fake.queueRows([]);
@@ -1149,7 +1232,6 @@ describe("admin.user.setActive", () => {
 
   it("refuses to deactivate the caller's own admin account", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[false]]);
 
     const setActive = router.admin.user.setActive.callable({ context: adminContext(fake) });
 
@@ -1172,7 +1254,6 @@ describe("admin.org", () => {
 
   it("lists companies with member and product counts", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[false]]);
     fake.queueRows([["org-acme", "Acme Manufacturing", "acme-manufacturing", true]]);
     fake.queueRows([["org-acme"], ["org-acme"]]);
     fake.queueRows([["org-acme", "prod-line-9"]]);
@@ -1187,7 +1268,6 @@ describe("admin.org", () => {
 
   it("replaces the entitlement set wholesale", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[false]]);
     fake.queueRows([["org-acme"]]);
     fake.queueRows([["prod-line-9"], ["prod-scan-2"]]);
     fake.queueRows([]);
@@ -1209,7 +1289,6 @@ describe("admin.org", () => {
 
   it("rejects unknown product ids instead of narrowing silently", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[false]]);
     fake.queueRows([["org-acme"]]);
     fake.queueRows([]);
 
@@ -1224,7 +1303,6 @@ describe("admin.org", () => {
 
   it("suspends the company and reports it", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[false]]);
     fake.queueRows([["org-acme", "Acme Manufacturing", "acme-manufacturing", false]]);
     fake.queueRows([["user-1"], ["user-2"]]);
     fake.queueRows([]);
@@ -1268,7 +1346,6 @@ describe("admin.product", () => {
 
   it("creates a product with a slugified name", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[false]]);
     fake.queueRows([]);
     fake.queueRows([["prod-new", "Line 10 Controller", "line-10-controller"]]);
 
@@ -1280,7 +1357,6 @@ describe("admin.product", () => {
 
   it("reports a duplicate slug as conflict", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[false]]);
     fake.queueRows([["prod-taken"]]);
 
     const create = router.admin.product.create.callable({ context: adminContext(fake) });
@@ -1314,7 +1390,6 @@ describe("admin.user.createClient", () => {
 
   it("creates the org, the user, and the entitlements in one flow", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[false]]);
     fake.queueRows([]);
     fake.queueRows([]);
     fake.queueRows([["prod-line-9"]]);
@@ -1343,7 +1418,6 @@ describe("admin.user.createClient", () => {
 
   it("reports a taken company slug as conflict", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[false]]);
     fake.queueRows([["org-taken"]]);
 
     const create = router.admin.user.createClient.callable({ context: adminContext(fake) });
@@ -1353,7 +1427,6 @@ describe("admin.user.createClient", () => {
 
   it("rejects unknown products before creating anything", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([[false]]);
     fake.queueRows([]);
     fake.queueRows([]);
     fake.queueRows([]);

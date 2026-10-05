@@ -13,11 +13,12 @@ type OrpcTicket = Awaited<ReturnType<RouterClient<AppRouter>["ticket"]["list"]>>
 
 export type Ticket = OrpcTicket;
 
-/** Shared /tickets search params: text query, status filter, escalated flag. */
+/** Shared /tickets search params: text query, status filter, escalated flag, tech scope tab. */
 export interface TicketListSearch {
   readonly q?: string;
   readonly status?: string;
   readonly escalated?: string;
+  readonly scope?: string;
 }
 
 export type TicketStatus = Ticket["status"];

@@ -31,6 +31,7 @@ const ticketsRoute = createRoute({
     q: typeof search.q === "string" ? search.q : undefined,
     status: typeof search.status === "string" ? search.status : undefined,
     escalated: typeof search.escalated === "string" ? search.escalated : undefined,
+    scope: typeof search.scope === "string" ? search.scope : undefined,
   }),
 });
 

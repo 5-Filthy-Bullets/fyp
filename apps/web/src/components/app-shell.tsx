@@ -2,7 +2,6 @@ import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { Menu } from "@base-ui/react/menu";
 import { Separator } from "@base-ui/react/separator";
 import {
-  Bell,
   Building,
   ChevronLeft,
   CircleUserRound,
@@ -39,15 +38,22 @@ interface NavItem {
   readonly label: string;
   readonly icon: LucideIcon;
   readonly roles: readonly Role[];
+  readonly search?: Record<string, string>;
 }
 const primaryNav: readonly NavItem[] = [
   { to: "/", label: "Home", icon: House, roles: ["client", "technician", "admin"] },
   { to: "/tickets", label: "My Tickets", icon: Ticket, roles: ["client"] },
   { to: "/tickets/new", label: "New Ticket", icon: TicketPlus, roles: ["client"] },
-  { to: "/tickets", label: "Queue", icon: Inbox, roles: ["technician"] },
-  { to: "/tickets", label: "My Work", icon: Wrench, roles: ["technician"] },
+  { to: "/tickets", label: "Queue", icon: Inbox, roles: ["technician"], search: { scope: "queue" } },
+  { to: "/tickets", label: "My Work", icon: Wrench, roles: ["technician"], search: { scope: "mine" } },
   { to: "/", label: "Dashboard", icon: LayoutDashboard, roles: ["admin"] },
-  { to: "/tickets", label: "Escalated", icon: TriangleAlert, roles: ["admin"] },
+  {
+    to: "/tickets",
+    label: "Escalated",
+    icon: TriangleAlert,
+    roles: ["admin"],
+    search: { escalated: "true" },
+  },
 ];
 
 const adminNav: readonly NavItem[] = [
@@ -177,11 +183,21 @@ function NavLink({
   readonly onNavigate: () => void;
 }) {
   const location = useLocation();
-  const active = location.pathname === item.to;
+  const search = location.search as Record<string, unknown>;
+  // Path match plus every search param the item declares. A bare /tickets
+  // entry (no search) only matches when no scope tab is selected, so Queue
+  // and My Work never highlight together.
+  const active =
+    location.pathname === item.to &&
+    Object.entries(item.search ?? {}).every(([key, value]) => search[key] === value) &&
+    (item.search !== undefined ||
+      item.to !== "/tickets" ||
+      (search["scope"] === undefined && search["escalated"] === undefined));
 
   return (
     <Link
       to={item.to}
+      search={item.search}
       onClick={onNavigate}
       aria-current={active ? "page" : undefined}
       title={collapsed ? item.label : undefined}
@@ -275,7 +291,6 @@ function Topbar({
         <SearchBox />
         <div className="ml-auto flex items-center gap-1">
           <ThemeToggleButton />
-          <NotificationBell />
           <AvatarMenu />
         </div>
       </div>
@@ -343,21 +358,6 @@ function ThemeToggleButton() {
       title={dark ? "Switch to light theme" : "Switch to dark theme"}
     >
       {dark ? <Sun aria-hidden /> : <Moon aria-hidden />}
-    </Button>
-  );
-}
-
-/** Placeholder bell. A later phase wires it to the notifications query. */
-function NotificationBell() {
-  return (
-    <Button variant="ghost" size="icon-sm" aria-label="Notifications" title="Notifications">
-      <span className="relative">
-        <Bell aria-hidden />
-        <span
-          className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-destructive"
-          aria-hidden
-        />
-      </span>
     </Button>
   );
 }
