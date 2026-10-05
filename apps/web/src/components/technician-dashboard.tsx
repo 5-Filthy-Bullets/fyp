@@ -48,7 +48,7 @@ export function TechnicianDashboard() {
           value={summary.unclaimed}
           icon={Hand}
           to="/tickets"
-          search={{ q: "unclaimed" }}
+          search={{ scope: "queue" }}
         />
         <StatCard
           label="In Progress"

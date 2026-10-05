@@ -237,7 +237,7 @@ function CreateClientForm({ onDone }: { readonly onDone: () => void }) {
               <Label htmlFor="client-password">Initial password</Label>
               <Input
                 id="client-password"
-                type="text"
+                type="password"
                 value={form.password}
                 onChange={(event) => setField("password", event.target.value)}
                 placeholder="8+ characters, handed over manually"

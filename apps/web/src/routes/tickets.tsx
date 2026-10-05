@@ -125,12 +125,19 @@ function TicketsList() {
   }, [search.status]);
 
   const escalatedFromUrl = search.escalated === "true";
+  const scopeFromUrl: TechScope = search.scope === "mine" ? SCOPE_MINE : SCOPE_QUEUE;
   const techTabs: readonly TechScope[] = ["queue", "mine"];
   const adminTabs: readonly AdminScope[] = ["all", "escalated"];
-  const defaultTechScope: TechScope = role === "technician" ? SCOPE_QUEUE : SCOPE_MINE;
+  const defaultTechScope: TechScope = role === "technician" ? scopeFromUrl : SCOPE_MINE;
   const defaultAdminScope: AdminScope = escalatedFromUrl ? SCOPE_ESCALATED : SCOPE_ALL;
   const [techScope, setTechScope] = useState<TechScope>(defaultTechScope);
   const [adminScope, setAdminScope] = useState<AdminScope>(defaultAdminScope);
+
+  useEffect(() => {
+    if (role === "technician") {
+      setTechScope(scopeFromUrl);
+    }
+  }, [scopeFromUrl, role]);
 
   useEffect(() => {
     if (role === "admin") {
@@ -153,7 +160,6 @@ function TicketsList() {
   );
 
   const scope = role === "technician" ? techScope : role === "admin" ? adminScope : SCOPE_ALL;
-  void scope;
 
   const filtered = useMemo(() => {
     const needle = debouncedQuery.trim().toLowerCase();
@@ -216,7 +222,17 @@ function TicketsList() {
                   key={tab}
                   active={techScope === tab}
                   label={tab === SCOPE_QUEUE ? "Queue" : "My work"}
-                  onSelect={() => setTechScope(tab)}
+                  onSelect={() => {
+                    setTechScope(tab);
+                    void navigate({
+                      to: "/tickets",
+                      search: (prev) =>
+                        tab === SCOPE_MINE
+                          ? { ...prev, scope: "mine" }
+                          : { ...prev, scope: "queue" },
+                      replace: true,
+                    });
+                  }}
                 />
               ))
             : adminTabs.map((tab) => (

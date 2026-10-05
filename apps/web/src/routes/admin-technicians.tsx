@@ -206,7 +206,7 @@ function CreateTechnicianForm({ onDone }: { readonly onDone: () => void }) {
             <Label htmlFor="tech-password">Initial password</Label>
             <Input
               id="tech-password"
-              type="text"
+              type="password"
               value={form.password}
               onChange={(event) => setField("password", event.target.value)}
               placeholder="8+ characters, handed over manually"

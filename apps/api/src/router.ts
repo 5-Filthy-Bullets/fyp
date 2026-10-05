@@ -65,20 +65,23 @@ const protectedProcedure = os.$context<RpcContext>().use(async ({ context, next 
 });
 
 /** Any signed-in account, with the role and org validated off the session. */
-const callerProcedure = protectedProcedure.use(({ context, next }) => {
+const callerProcedure = protectedProcedure.use(async ({ context, next }) => {
   const caller = readCaller(context.session);
+  await assertCallerActive(context.db, caller);
   return next({ context: { ...context, caller } });
 });
 
 /** Clients only. The org is read from the session, never from input. */
-const clientProcedure = protectedProcedure.use(({ context, next }) => {
+const clientProcedure = protectedProcedure.use(async ({ context, next }) => {
   const caller = requireClientCaller(context.session);
+  await assertCallerActive(context.db, caller);
   return next({ context: { ...context, caller } });
 });
 
 /** Vendor staff, who work across every client org. */
-const staffProcedure = protectedProcedure.use(({ context, next }) => {
+const staffProcedure = protectedProcedure.use(async ({ context, next }) => {
   const caller = requireStaffCaller(context.session);
+  await assertCallerActive(context.db, caller);
   return next({ context: { ...context, caller } });
 });
 
@@ -667,14 +670,14 @@ export const ticketRouter = {
     .output(z.object({ ticket: ticketOutput }))
     .handler(async ({ context, input }) => {
       const [assignee] = await context.db
-        .select({ id: user.id, role: user.role })
+        .select({ id: user.id, role: user.role, banned: user.banned })
         .from(user)
         .where(eq(user.id, input.assigneeId))
         .limit(1);
 
-      if (!assignee || assignee.role !== "technician") {
+      if (!assignee || assignee.role !== "technician" || assignee.banned) {
         throw new ORPCError("BAD_REQUEST", {
-          message: "That account is not a technician.",
+          message: "That account is not an active technician.",
         });
       }
 
