@@ -21,17 +21,9 @@ export interface SessionUser {
  * delete targets the same row signup created.
  */
 const signUpQueue: { readonly id: string }[] = [];
-const queuedSignUpIds: string[] = [];
 
 export const queueSignUpUser = (id: string): void => {
   signUpQueue.push({ id });
-  queuedSignUpIds.push(id);
-};
-
-/** Email lookup rows after a mocked sign-up: the duplicate row to delete. */
-export const signUpDuplicateRow = (): readonly unknown[] => {
-  const id = queuedSignUpIds.shift() ?? "signup-duplicate";
-  return [id];
 };
 
 export const authWithSession = (user: SessionUser): SessionReader => ({
