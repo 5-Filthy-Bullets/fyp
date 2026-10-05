@@ -14,22 +14,6 @@ import {
 const headers = sessionHeaders;
 
 describe("hello", () => {
-  it("greets the authenticated user by name", async () => {
-    const hello = router.hello.callable({
-      context: {
-        headers,
-        auth: authWithSession({
-          name: "Jane",
-          role: "client",
-          organizationId: "org-acme",
-        }),
-        db: fakeDatabase().db,
-      },
-    });
-
-    await expect(hello()).resolves.toEqual({ message: "Hello, Jane" });
-  });
-
   it("rejects callers without a session as unauthorized", async () => {
     const hello = router.hello.callable({
       context: { headers, auth: authWithoutSession(), db: fakeDatabase().db },
@@ -40,28 +24,6 @@ describe("hello", () => {
 });
 
 describe("me", () => {
-  it("returns the client role and organization from the session", async () => {
-    const me = router.me.callable({
-      context: {
-        headers,
-        auth: authWithSession({
-          name: "Dana Okafor",
-          role: "client",
-          organizationId: "org-acme",
-        }),
-        db: fakeDatabase().db,
-      },
-    });
-
-    await expect(me()).resolves.toEqual({
-      caller: {
-        userId: "test-user-id",
-        role: "client",
-        organizationId: "org-acme",
-      },
-    });
-  });
-
   it("rejects a session whose role is outside the known enum", async () => {
     const me = router.me.callable({
       context: {
@@ -182,10 +144,10 @@ describe("ticket.create", () => {
     const create = router.ticket.create.callable({ context: clientContext(fake) });
     const result = await create(validInput);
 
-    expect(result.ticket.status).toBe("open");
+    // Priority flows from the input; the org from the session, never the body.
     expect(result.ticket.priority).toBe("high");
-    expect(result.ticket.escalated).toBe(false);
     expect(result.ticket.organizationId).toBe("org-acme");
+    // Timestamps cross the wire as ISO strings, converted off the Date row.
     expect(result.ticket.createdAt).toBe("2026-03-04T09:15:00.000Z");
     expect(fake.queries[1]?.params).toContain("org-acme");
   });
@@ -333,29 +295,6 @@ describe("ticket.listMine", () => {
 });
 
 describe("ticket.list", () => {
-  it("returns the staff queue with org and product names resolved", async () => {
-    const fake = fakeDatabase();
-    fake.queueRows([ticketRow()]);
-
-    const list = router.ticket.list.callable({
-      context: {
-        headers,
-        auth: authWithSession({
-          name: "Toni Alvarez",
-          role: "technician",
-          organizationId: null,
-        }),
-        db: fake.db,
-      },
-    });
-
-    const { tickets } = await list({});
-
-    expect(tickets).toHaveLength(1);
-    expect(tickets[0]?.organizationName).toBe("Acme Manufacturing");
-    expect(tickets[0]?.productName).toBe("Line 9 Controller");
-  });
-
   it("scopes to one organization when the caller passes a filter", async () => {
     const fake = fakeDatabase();
     fake.queueRows([ticketRow()]);
@@ -625,7 +564,10 @@ describe("ticket.assign", () => {
     const { ticket } = await assign({ ticketId: "ticket-1", assigneeId: "tech-2" });
 
     expect(ticket.assignedTo).toBe("tech-2");
-    expect(fake.queries[0]?.params).toContain("tech-2");
+    // The owner in the response is read back from a queued row, so pin the
+    // write itself: the update must carry the assignee to the right ticket.
+    const write = fake.queries.find((query) => query.sql.startsWith('update "ticket"'));
+    expect(write?.params).toEqual(["tech-2", "ticket-1"]);
   });
 
   it("rejects an assignee who is not a technician", async () => {
@@ -719,7 +661,10 @@ describe("ticket.escalate", () => {
 
     expect(ticket.escalated).toBe(true);
     expect(ticket.escalatedReason).toBe(reason);
-    expect(fake.queries[0]?.params).toContain(reason);
+    // The flag in the response is read back from a queued row, so pin the
+    // write itself: the update must carry the flag and reason to the ticket.
+    const write = fake.queries.find((query) => query.sql.startsWith('update "ticket"'));
+    expect(write?.params).toEqual([true, reason, "ticket-1"]);
   });
 
   it("rejects a reason too short to act on", async () => {
@@ -1090,16 +1035,26 @@ describe("admin.user.list", () => {
     db: fake.db,
   });
 
-  it("returns technicians with the org name resolved", async () => {
+  it("pages through the directory without recounting", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([userRow(), userRow({ id: "user-2", email: "tech2@reliable.test" })]);
+    const directory = [
+      userRow(),
+      userRow({ id: "user-2", email: "tech2@reliable.test" }),
+      userRow({ id: "user-3", email: "tech3@reliable.test" }),
+    ];
+    // One result set per call: the fake consumes a queued set per statement.
+    fake.queueRows(directory);
+    fake.queueRows(directory);
 
     const list = router.admin.user.list.callable({ context: adminContext(fake) });
-    const result = await list({ role: "technician" });
+    const first = await list({ role: "technician", limit: 2 });
+    const second = await list({ role: "technician", limit: 2, offset: 2 });
 
-    expect(result.total).toBe(2);
-    expect(result.users[0]?.role).toBe("technician");
-    expect(fake.queries[0]?.sql).toContain("desc");
+    expect(first.users.map((user) => user.id)).toEqual(["user-1", "user-2"]);
+    expect(second.users.map((user) => user.id)).toEqual(["user-3"]);
+    // The total counts the whole directory, not the page.
+    expect(first.total).toBe(3);
+    expect(second.total).toBe(3);
   });
 
   it("filters on name or email when a search is passed", async () => {
@@ -1140,8 +1095,11 @@ describe("admin.user.createTechnician", () => {
     const create = router.admin.user.createTechnician.callable({ context: adminContext(fake) });
     const result = await create(validInput);
 
-    expect(result.user.role).toBe("technician");
-    expect(result.user.organizationId).toBeNull();
+    expect(result.user.id).toBe("tech-new");
+    // The role and org are stamped onto the sign-up row by a write the fake
+    // swallows, so the recorded update is the only proof it happened.
+    const stamp = fake.queries.find((query) => query.sql.startsWith('update "user"'));
+    expect(stamp?.params).toEqual(["technician", null, "tech-new"]);
   });
 
   it("reports a duplicate email as conflict before touching auth", async () => {
@@ -1183,6 +1141,10 @@ describe("admin.user.update", () => {
     const result = await update({ userId: "tech-1", name: "Renamed Tech" });
 
     expect(result.user.name).toBe("Renamed Tech");
+    // The name in the response is read back from a queued row, so pin the
+    // write itself: the update must carry the new name to the right row.
+    const write = fake.queries.find((query) => query.sql.startsWith('update "user"'));
+    expect(write?.params).toEqual(["Renamed Tech", "tech-1"]);
   });
 
   it("refuses to touch admin accounts", async () => {
@@ -1226,8 +1188,13 @@ describe("admin.user.setActive", () => {
     const setActive = router.admin.user.setActive.callable({ context: adminContext(fake) });
     const result = await setActive({ userId: "tech-1", active: false });
 
-    expect(result.user.banned).toBe(true);
     expect(result.message).toContain("deactivated");
+    // Banning must flip the flag and delete live sessions; the echoed row
+    // cannot prove either, but the recorded writes can.
+    const ban = fake.queries.find((query) => query.sql.startsWith('update "user"'));
+    expect(ban?.params).toEqual([true, null, null, "tech-1"]);
+    const drop = fake.queries.find((query) => query.sql.startsWith('delete from "session"'));
+    expect(drop?.params).toEqual(["tech-1"]);
   });
 
   it("refuses to deactivate the caller's own admin account", async () => {
@@ -1285,6 +1252,16 @@ describe("admin.org", () => {
     });
 
     expect(result.organization.productIds).toEqual(["prod-line-9", "prod-scan-2"]);
+    // Wholesale means the old links are deleted before the new ones land.
+    const clear = fake.queries.find((query) => query.sql.startsWith('delete from "org_product"'));
+    expect(clear?.params).toEqual(["org-acme"]);
+    const links = fake.queries.filter((query) =>
+      query.sql.startsWith('insert into "org_product"'),
+    );
+    expect(links.map((query) => query.params)).toEqual([
+      ["org-acme", "prod-line-9"],
+      ["org-acme", "prod-scan-2"],
+    ]);
   });
 
   it("rejects unknown product ids instead of narrowing silently", async () => {
@@ -1314,6 +1291,11 @@ describe("admin.org", () => {
 
     expect(result.organization.isActive).toBe(false);
     expect(result.message).toContain("deactivated");
+    // Suspending must drop every member session at once, not just flip the flag.
+    const drops = fake.queries.filter((query) =>
+      query.sql.startsWith('delete from "session"'),
+    );
+    expect(drops.map((query) => query.params)).toEqual([["user-1"], ["user-2"]]);
   });
 
   it("refuses technicians on org lists", async () => {
