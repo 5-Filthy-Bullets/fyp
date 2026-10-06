@@ -10,6 +10,14 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardPanel, CardTitle } from "@/components/ui/card";
+import {
+  Autocomplete,
+  AutocompleteEmpty,
+  AutocompleteInput,
+  AutocompleteItem,
+  AutocompleteList,
+  AutocompletePopup,
+} from "@/components/ui/autocomplete";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
@@ -26,8 +34,9 @@ import {
   useSetTicketStatus,
   useTicketDetail,
   useTicketMessages,
+  useTechnicians,
 } from "@/lib/tickets";
-import type { TicketMessage, TicketPriority } from "@/lib/tickets";
+import type { TechnicianPick, TicketMessage, TicketPriority } from "@/lib/tickets";
 
 const escalateSchema = z.object({
   reason: z.string().trim().min(3, "Say why in a few words (3+ characters).").max(500),
@@ -129,7 +138,6 @@ function TicketDetail() {
           <Composer ticketId={ticketId} isStaff={isStaff} />
         </div>
         <div className="grid content-start gap-6">
-          <FactsCard ticketId={ticketId} />
           <ActionsCard ticketId={ticketId} />
         </div>
       </div>
@@ -291,62 +299,26 @@ function Composer({ ticketId, isStaff }: { readonly ticketId: string; readonly i
   );
 }
 
-function FactsCard({ ticketId }: { readonly ticketId: string }) {
-  const detail = useTicketDetail(ticketId);
-
-  if (detail.isPending || detail.isError) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Details</CardTitle>
-        </CardHeader>
-        <CardPanel>
-          <p className="text-sm text-muted-foreground">Loading details…</p>
-        </CardPanel>
-      </Card>
-    );
+/** Matches the assignee picker query against name, email, or id. */
+const matchesTechnician = (tech: TechnicianPick, query: string): boolean => {
+  const needle = query.trim().toLowerCase();
+  if (needle === "") {
+    return true;
   }
+  return `${tech.name} ${tech.email} ${tech.id}`.toLowerCase().includes(needle);
+};
 
-  const { ticket } = detail.data;
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Details</CardTitle>
-        <CardDescription>Facts about this ticket.</CardDescription>
-      </CardHeader>
-      <CardPanel className="grid gap-3">
-        <Fact label="Status" value={statusLabel(ticket.status)} />
-        <Fact label="Priority" value={priorityLabel(ticket.priority)} />
-        <Fact label="Product" value={ticket.productName} />
-        <Fact label="Organization" value={ticket.organizationName} />
-        <Fact label="Reporter" value={ticket.reporterName} />
-        <Fact label="Assignee" value={ticket.assignedTo ?? "Unclaimed"} />
-        <Fact label="Filed" value={formatTicketDate(ticket.createdAt)} />
-        {ticket.escalated && (
-          <div className="grid gap-1 rounded-lg border border-destructive/32 bg-destructive/8 p-3 dark:bg-destructive/16">
-            <p className="flex items-center gap-1.5 text-sm font-medium text-destructive-foreground">
-              <TriangleAlert className="size-4" aria-hidden />
-              Escalated for admin review
-            </p>
-            {ticket.escalatedReason !== null && (
-              <p className="text-sm text-muted-foreground">{ticket.escalatedReason}</p>
-            )}
-          </div>
-        )}
-      </CardPanel>
-    </Card>
-  );
-}
-
-function Fact({ label, value }: { readonly label: string; readonly value: string }) {
-  return (
-    <div className="grid gap-0.5">
-      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="text-sm">{value}</dd>
-    </div>
-  );
-}
+/**
+ * Autocomplete reports text, not the picked row: an exact id, email, or name
+ * hit resolves back to the technician, anything else clears the selection.
+ */
+const resolveTechnicianId = (techs: readonly TechnicianPick[], text: string): string => {
+  if (text === "") {
+    return "";
+  }
+  const exact = techs.find((tech) => tech.id === text || tech.email === text || tech.name === text);
+  return exact?.id ?? "";
+};
 
 function ActionsCard({ ticketId }: { readonly ticketId: string }) {
   const { role, userId } = useCaller();
@@ -354,9 +326,12 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
   const setStatus = useSetTicketStatus();
   const assign = useAssignTicket();
   const ticket = detail.data?.ticket;
+  const techsQuery = useTechnicians();
+  const techs = techsQuery.data?.technicians ?? [];
 
   const isStaff = role === "technician" || role === "admin";
   const [assigneeId, setAssigneeId] = useState("");
+  const [pickerKey, setPickerKey] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
 
   if (!isStaff) {
@@ -416,14 +391,17 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
     event.preventDefault();
     const trimmed = assigneeId.trim();
     if (trimmed === "") {
-      setActionError("Paste a technician user id first.");
+      setActionError("Pick a technician first.");
       return;
     }
     setActionError(null);
     assign.mutate(
       { ticketId, assigneeId: trimmed },
       {
-        onSuccess: () => setAssigneeId(""),
+        onSuccess: () => {
+          setAssigneeId("");
+          setPickerKey((key) => key + 1);
+        },
         onError: (error) => {
           setActionError(error instanceof Error ? error.message : "Could not assign the ticket.");
         },
@@ -432,22 +410,37 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
   };
 
   const isMine = userId !== undefined && ticket?.assignedTo === userId;
+  // Never the raw user id: fall back to "someone" until the directory names them.
+  const assigneeName =
+    ticket?.assignedTo === undefined || ticket.assignedTo === null
+      ? null
+      : (techs.find((tech) => tech.id === ticket.assignedTo)?.name ?? null);
   const busy = setStatus.isPending || assign.isPending;
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Actions</CardTitle>
-        <CardDescription>Work the ticket from here.</CardDescription>
       </CardHeader>
       <CardPanel className="grid gap-4">
+        {ticket?.escalated === true && (
+          <div className="grid gap-1 rounded-lg border border-destructive/32 bg-destructive/8 p-3 dark:bg-destructive/16">
+            <p className="flex items-center gap-1.5 text-sm font-medium text-destructive-foreground">
+              <TriangleAlert className="size-4" aria-hidden />
+              Escalated for admin review
+            </p>
+            {ticket.escalatedReason !== null && (
+              <p className="text-sm text-muted-foreground">{ticket.escalatedReason}</p>
+            )}
+          </div>
+        )}
         {ticket?.assignedTo === null ? (
           <Button onClick={claim} loading={setStatus.isPending}>
             Claim this ticket
           </Button>
         ) : (
           <p className="text-sm text-muted-foreground">
-            {isMine ? "You own this ticket." : `Assigned to ${ticket?.assignedTo ?? "someone"}.`}
+            {isMine ? "You own this ticket." : `Assigned to ${assigneeName ?? "someone"}.`}
           </p>
         )}
         <div className="grid gap-1.5">
@@ -486,20 +479,51 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
         </div>
         <form className="grid gap-1.5" onSubmit={assignTo}>
           <Label htmlFor="assignee">Assign to technician</Label>
-          <div className="flex gap-2">
-            <Input
-              id="assignee"
-              value={assigneeId}
-              onChange={(event) => setAssigneeId(event.target.value)}
-              placeholder="Technician user id"
-              className="min-w-0 flex-1"
-            />
-            <Button type="submit" variant="outline" loading={assign.isPending}>
-              Assign
-            </Button>
-          </div>
+          {techsQuery.isPending ? (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+              <Spinner className="size-4" aria-hidden /> Loading technicians…
+            </p>
+          ) : (
+            <div className="flex gap-2">
+              <div className="min-w-0 flex-1">
+                <Autocomplete
+                  key={pickerKey}
+                  items={techs}
+                  filter={matchesTechnician}
+                  itemToStringValue={(tech) => tech.name}
+                  openOnInputClick
+                  onValueChange={(text) => setAssigneeId(resolveTechnicianId(techs, text))}
+                >
+                  <AutocompleteInput
+                    id="assignee"
+                    placeholder="Search by name, email, or id…"
+                    showTrigger
+                    showClear
+                  />
+                  <AutocompletePopup>
+                    <AutocompleteEmpty>No technicians match this search.</AutocompleteEmpty>
+                    <AutocompleteList>
+                      {(tech) => (
+                        <AutocompleteItem key={tech.id} value={tech}>
+                          <span className="grid min-w-0 flex-1">
+                            <span className="truncate text-sm font-medium">{tech.name}</span>
+                            <span className="truncate text-xs text-muted-foreground">
+                              {tech.email}
+                            </span>
+                          </span>
+                        </AutocompleteItem>
+                      )}
+                    </AutocompleteList>
+                  </AutocompletePopup>
+                </Autocomplete>
+              </div>
+              <Button type="submit" variant="outline" loading={assign.isPending}>
+                Assign
+              </Button>
+            </div>
+          )}
           <p className="text-xs text-muted-foreground">
-            Paste the technician's user id. Only technician accounts can own queue work.
+            Search by name, email, or id. Only technician accounts can own queue work.
           </p>
         </form>
         {role === "technician" && !ticket?.escalated && <EscalateForm ticketId={ticketId} />}

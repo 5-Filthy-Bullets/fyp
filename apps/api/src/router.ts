@@ -705,6 +705,43 @@ export const ticketRouter = {
       return { ticket: toTicketOutput(changed) };
     }),
 
+  /**
+   * Assignee picker for the detail page's Actions card. Every active
+   * technician, name-sorted, so staff can search by name, email, or id
+   * instead of pasting a raw user id. Staff-wide because technicians assign
+   * too; banned accounts are excluded because assign rejects them.
+   */
+  listTechnicians: staffProcedure
+    .route({
+      method: "GET",
+      path: "/tickets/technicians",
+      summary: "List active technicians for the assignee picker",
+      description:
+        "Every vendor technician account that can own queue work, name-sorted. Banned accounts are excluded because assigning to them fails.",
+      tags: ["Tickets"],
+    })
+    .input(z.object({}))
+    .output(
+      z.object({
+        technicians: z.array(
+          z.object({
+            id: z.string().describe("Technician user id"),
+            name: z.string().describe("Technician display name"),
+            email: z.string().describe("Technician sign-in email"),
+          }),
+        ),
+      }),
+    )
+    .handler(async ({ context }) => {
+      const rows = await context.db
+        .select({ id: user.id, name: user.name, email: user.email })
+        .from(user)
+        .where(and(eq(user.role, "technician"), eq(user.banned, false)))
+        .orderBy(asc(user.name));
+
+      return { technicians: rows };
+    }),
+
   escalate: staffProcedure
     .route({
       method: "PATCH",

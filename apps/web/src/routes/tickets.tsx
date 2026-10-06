@@ -1,5 +1,16 @@
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { Inbox, TicketPlus } from "lucide-react";
+import {
+  createColumnHelper,
+  flexRender,
+  getCoreRowModel,
+  getPaginationRowModel,
+  getSortedRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
+import type { SortingState } from "@tanstack/react-table";
+import { Toggle as TogglePrimitive } from "@base-ui/react/toggle";
+import { ToggleGroup as ToggleGroupPrimitive } from "@base-ui/react/toggle-group";
+import { ArrowDown, ArrowUp, ArrowUpDown, Inbox, Search, TicketPlus, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { SessionGuard } from "@/components/auth-guard";
@@ -8,17 +19,35 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardPanel } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useCaller } from "@/lib/session";
-import { formatTicketDate, statusLabel, ticketStatuses } from "@/lib/tickets";
-import type { Ticket, TicketListSearch, TicketStatus } from "@/lib/tickets";
+import {
+  segmentedControlItemVariants,
+  segmentedControlRootClassName,
+} from "@/lib/segmented-control";
+import {
+  formatTicketDate,
+  priorityLabel,
+  statusLabel,
+  ticketPriorities,
+  ticketStatuses,
+} from "@/lib/tickets";
+import type { Ticket, TicketListSearch, TicketPriority, TicketStatus } from "@/lib/tickets";
 import { useMyTickets, useTicketQueue } from "@/lib/tickets";
 
 const PAGE_SIZE = 10;
 const SEARCH_DEBOUNCE_MS = 250;
 const ALL_STATUSES = "all";
+const ALL_PRIORITIES = "all";
 const SCOPE_QUEUE = "queue";
 const SCOPE_MINE = "mine";
 const SCOPE_ALL = "all";
@@ -27,8 +56,11 @@ const SCOPE_ESCALATED = "escalated";
 type TechScope = "queue" | "mine";
 type AdminScope = "all" | "escalated";
 type StatusFilter = TicketStatus | typeof ALL_STATUSES;
+type PriorityFilter = TicketPriority | typeof ALL_PRIORITIES;
 
-/** Search ?q= is owned by the topbar too, so the hook reads it, not local state. */
+const columnHelper = createColumnHelper<Ticket>();
+
+/** Search ?q= arrives via shared links, so the hook reads it, not local state. */
 const useDebouncedValue = (value: string, delayMs: number): string => {
   const [debounced, setDebounced] = useState(value);
 
@@ -91,7 +123,7 @@ function TicketsList() {
   const [queryInput, setQueryInput] = useState(urlQuery);
   const debouncedQuery = useDebouncedValue(queryInput, SEARCH_DEBOUNCE_MS);
 
-  // The topbar parks ?q= on "/", so sync its value in when arriving from there.
+  // Shared links can carry ?q=, so sync its value in on arrival.
   useEffect(() => {
     setQueryInput(urlQuery);
   }, [urlQuery]);
@@ -127,11 +159,11 @@ function TicketsList() {
   const escalatedFromUrl = search.escalated === "true";
   const scopeFromUrl: TechScope = search.scope === "mine" ? SCOPE_MINE : SCOPE_QUEUE;
   const techTabs: readonly TechScope[] = ["queue", "mine"];
-  const adminTabs: readonly AdminScope[] = ["all", "escalated"];
+  // The sidebar owns the admin All/Escalated split via ?escalated=, so the
+  // scope derives straight from the URL with no in-page tabs.
+  const adminScope: AdminScope = escalatedFromUrl ? SCOPE_ESCALATED : SCOPE_ALL;
   const defaultTechScope: TechScope = role === "technician" ? scopeFromUrl : SCOPE_MINE;
-  const defaultAdminScope: AdminScope = escalatedFromUrl ? SCOPE_ESCALATED : SCOPE_ALL;
   const [techScope, setTechScope] = useState<TechScope>(defaultTechScope);
-  const [adminScope, setAdminScope] = useState<AdminScope>(defaultAdminScope);
 
   useEffect(() => {
     if (role === "technician") {
@@ -139,15 +171,9 @@ function TicketsList() {
     }
   }, [scopeFromUrl, role]);
 
-  useEffect(() => {
-    if (role === "admin") {
-      setAdminScope(escalatedFromUrl ? SCOPE_ESCALATED : SCOPE_ALL);
-    }
-  }, [escalatedFromUrl, role]);
-
   // Canonical staff scope URLs: a bare /tickets means "queue" for technicians
   // and "all" (?escalated=false) for admins. Writing it into the URL keeps the
-  // sidebar highlight, the scope tabs, and shared links in agreement instead
+  // sidebar highlight, the tab state, and shared links in agreement instead
   // of leaving a param-less URL no nav entry owns.
   const needsTechScope = role === "technician" && search.scope === undefined;
   const needsAdminScope = role === "admin" && search.escalated === undefined;
@@ -166,7 +192,9 @@ function TicketsList() {
     });
   }, [needsTechScope, needsAdminScope, navigate]);
 
-  const [page, setPage] = useState(1);
+  const [priority, setPriority] = useState<PriorityFilter>(ALL_PRIORITIES);
+  const [sorting, setSorting] = useState<SortingState>([{ desc: true, id: "createdAt" }]);
+  const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: PAGE_SIZE });
 
   const clientQuery = useMyTickets();
   const staffQuery = useTicketQueue(
@@ -187,19 +215,81 @@ function TicketsList() {
     return tickets.filter(
       (ticket) =>
         (status === ALL_STATUSES || ticket.status === status) &&
+        (priority === ALL_PRIORITIES || ticket.priority === priority) &&
         matchesScope(ticket, scope, userId, role) &&
         (needle === "" || matchesQuery(ticket, needle)),
     );
-  }, [debouncedQuery, role, scope, status, tickets, userId]);
+  }, [debouncedQuery, priority, role, scope, status, tickets, userId]);
 
-  // A filter change can strand the page past the last page, so reset to page 1.
+  const columns = useMemo(
+    () => [
+      columnHelper.accessor("title", {
+        cell: (info) => {
+          const ticket = info.row.original;
+          return (
+            <div className="min-w-52">
+              <Link
+                to="/tickets/$ticketId"
+                params={{ ticketId: ticket.id }}
+                className="block truncate text-sm font-medium text-primary hover:underline"
+              >
+                {ticket.title}
+              </Link>
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                {isStaff
+                  ? `${ticket.organizationName} · ${ticket.productName} · ${ticket.reporterName}`
+                  : `${ticket.productName} · ${ticket.reporterName}`}
+              </p>
+            </div>
+          );
+        },
+        header: "Ticket",
+      }),
+      columnHelper.accessor("status", {
+        cell: (info) => <StatusBadge status={info.getValue()} />,
+        header: "Status",
+      }),
+      columnHelper.accessor("priority", {
+        cell: (info) => (
+          <span className="inline-flex flex-wrap items-center gap-1.5">
+            <PriorityBadge priority={info.getValue()} />
+            {info.row.original.escalated && <Badge variant="error">Escalated</Badge>}
+          </span>
+        ),
+        header: "Priority",
+      }),
+      columnHelper.accessor("createdAt", {
+        cell: (info) => (
+          <span className="text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+            {formatTicketDate(info.getValue())}
+          </span>
+        ),
+        header: "Created",
+      }),
+    ],
+    [isStaff],
+  );
+
+  const table = useReactTable({
+    autoResetPageIndex: false,
+    columns,
+    data: filtered,
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    onPaginationChange: setPagination,
+    onSortingChange: setSorting,
+    state: { pagination, sorting },
+  });
+
+  // A filter change can strand the page past the last page, so jump back.
+  // Pagination stays put across background refetches and re-sorts.
   useEffect(() => {
-    setPage(1);
-  }, [debouncedQuery, scope, status, techScope, adminScope, role]);
+    setPagination((prev) => (prev.pageIndex === 0 ? prev : { ...prev, pageIndex: 0 }));
+  }, [debouncedQuery, scope, status, priority, techScope, adminScope, role]);
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const safePage = Math.min(page, pageCount);
-  const visible = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const pageCount = table.getPageCount();
+  const pageIndex = table.getState().pagination.pageIndex;
 
   const setStatusFilter = (next: StatusFilter) => {
     setStatus(next);
@@ -235,79 +325,76 @@ function TicketsList() {
         }
       />
 
-      {(role === "technician" || role === "admin") && (
+      {role === "technician" && (
         <div className="flex flex-wrap gap-2" role="tablist" aria-label="Ticket scope">
-          {role === "technician"
-            ? techTabs.map((tab) => (
-                <ScopeTab
-                  key={tab}
-                  active={techScope === tab}
-                  label={tab === SCOPE_QUEUE ? "Queue" : "My work"}
-                  onSelect={() => {
-                    setTechScope(tab);
-                    void navigate({
-                      to: "/tickets",
-                      search: (prev) =>
-                        tab === SCOPE_MINE
-                          ? { ...prev, scope: "mine" }
-                          : { ...prev, scope: "queue" },
-                      replace: true,
-                    });
-                  }}
-                />
-              ))
-            : adminTabs.map((tab) => (
-                <ScopeTab
-                  key={tab}
-                  active={adminScope === tab}
-                  label={tab === SCOPE_ALL ? "All" : "Escalated"}
-                  onSelect={() => {
-                    setAdminScope(tab);
-                    void navigate({
-                      to: "/tickets",
-                      search: (prev) =>
-                        tab === SCOPE_ESCALATED
-                          ? { ...prev, escalated: "true" }
-                          : { ...prev, escalated: undefined },
-                      replace: true,
-                    });
-                  }}
-                />
-              ))}
+          {techTabs.map((tab) => (
+            <ScopeTab
+              key={tab}
+              active={techScope === tab}
+              label={tab === SCOPE_QUEUE ? "Queue" : "My work"}
+              onSelect={() => {
+                setTechScope(tab);
+                void navigate({
+                  to: "/tickets",
+                  search: (prev) =>
+                    tab === SCOPE_MINE ? { ...prev, scope: "mine" } : { ...prev, scope: "queue" },
+                  replace: true,
+                });
+              }}
+            />
+          ))}
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
-        <div className="grid gap-1.5">
-          <Label htmlFor="ticket-search">Search</Label>
-          <Input
-            id="ticket-search"
-            type="search"
-            value={queryInput}
-            onChange={(event) => setQueryInput(event.target.value)}
-            placeholder="Search title, description, reporter…"
-            aria-label="Search tickets"
-          />
-        </div>
-        <fieldset className="grid gap-1.5">
-          <legend className="text-sm font-medium">Status</legend>
-          <div className="flex flex-wrap gap-2">
-            <StatusFilterButton
-              active={status === ALL_STATUSES}
-              label="All"
-              onSelect={() => setStatusFilter(ALL_STATUSES)}
-            />
-            {ticketStatuses.map((value) => (
-              <StatusFilterButton
-                key={value}
-                active={status === value}
-                label={statusLabel(value)}
-                onSelect={() => setStatusFilter(value)}
-              />
-            ))}
-          </div>
-        </fieldset>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <SegmentedFilter<StatusFilter>
+          label="Status"
+          value={status}
+          onSelect={(next) => setStatusFilter(next)}
+          options={[
+            { label: "All", value: ALL_STATUSES },
+            ...ticketStatuses.map((value) => ({ label: statusLabel(value), value })),
+          ]}
+        />
+        <SegmentedFilter<PriorityFilter>
+          label="Priority"
+          value={priority}
+          onSelect={(next) => setPriority(next)}
+          options={[
+            { label: "All", value: ALL_PRIORITIES },
+            ...ticketPriorities.map((value) => ({ label: priorityLabel(value), value })),
+          ]}
+        />
       </div>
+      <InputGroup>
+        <InputGroupInput
+          id="ticket-search"
+          type="search"
+          value={queryInput}
+          onChange={(event) => setQueryInput(event.target.value)}
+          placeholder="Search title, description, reporter…"
+          aria-label="Search tickets"
+        />
+        <InputGroupAddon>
+          <Search aria-hidden />
+        </InputGroupAddon>
+        {(queryInput !== debouncedQuery || queryInput !== "") && (
+          <InputGroupAddon align="inline-end">
+            {queryInput !== debouncedQuery ? (
+              <Spinner className="size-4" aria-label="Applying search" />
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Clear search"
+                onClick={() => setQueryInput("")}
+              >
+                <X aria-hidden />
+              </Button>
+            )}
+          </InputGroupAddon>
+        )}
+      </InputGroup>
 
       {query.isPending ? (
         <Card>
@@ -341,59 +428,74 @@ function TicketsList() {
           </CardPanel>
         </Card>
       ) : (
-        <Card>
-          <CardPanel className="grid gap-0 p-0">
-            <ul className="divide-y">
-              {visible.map((ticket) => (
-                <li key={ticket.id} className="px-6 py-3.5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Link
-                      to="/tickets/$ticketId"
-                      params={{ ticketId: ticket.id }}
-                      className="min-w-0 flex-1 truncate text-sm font-medium text-primary hover:underline"
-                    >
-                      {ticket.title}
-                    </Link>
-                    <StatusBadge status={ticket.status} />
-                    <PriorityBadge priority={ticket.priority} />
-                    {ticket.escalated && <Badge variant="error">Escalated</Badge>}
-                  </div>
-                  <p className="mt-1 truncate text-xs text-muted-foreground">
-                    {isStaff
-                      ? `${ticket.organizationName} · ${ticket.productName} · ${ticket.reporterName}`
-                      : `${ticket.productName} · ${ticket.reporterName}`}{" "}
-                    · {formatTicketDate(ticket.createdAt)}
-                  </p>
-                </li>
+        <div className="grid gap-3">
+          <Table variant="card">
+            <TableHeader>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <TableRow key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => {
+                    const sorted = header.column.getIsSorted();
+                    return (
+                      <TableHead
+                        key={header.id}
+                        aria-sort={
+                          sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : "none"
+                        }
+                      >
+                        {header.isPlaceholder ? null : (
+                          <button
+                            type="button"
+                            onClick={header.column.getToggleSortingHandler()}
+                            className="inline-flex cursor-pointer items-center gap-1.5 hover:text-foreground"
+                          >
+                            {flexRender(header.column.columnDef.header, header.getContext())}
+                            <SortIcon direction={sorted} />
+                          </button>
+                        )}
+                      </TableHead>
+                    );
+                  })}
+                </TableRow>
               ))}
-            </ul>
-            {pageCount > 1 && (
-              <div className="flex items-center justify-between border-t px-6 py-3">
-                <p className="text-xs text-muted-foreground tabular-nums" aria-live="polite">
-                  Page {safePage} of {pageCount} · {filtered.length} tickets
-                </p>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={safePage <= 1}
-                    onClick={() => setPage(safePage - 1)}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={safePage >= pageCount}
-                    onClick={() => setPage(safePage + 1)}
-                  >
-                    Next
-                  </Button>
-                </div>
+            </TableHeader>
+            <TableBody>
+              {table.getRowModel().rows.map((row) => (
+                <TableRow key={row.id}>
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id}>
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          {pageCount > 1 && (
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground tabular-nums" aria-live="polite">
+                Page {pageIndex + 1} of {pageCount} · {filtered.length} tickets
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!table.getCanPreviousPage()}
+                  onClick={() => table.previousPage()}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!table.getCanNextPage()}
+                  onClick={() => table.nextPage()}
+                >
+                  Next
+                </Button>
               </div>
-            )}
-          </CardPanel>
-        </Card>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -421,23 +523,55 @@ function ScopeTab({
   );
 }
 
-function StatusFilterButton({
-  active,
+/**
+ * One exclusive filter as a segmented control: a single-select toggle group
+ * on the shared coss surface. Deselecting the active segment is ignored so
+ * the filter always holds a value.
+ */
+function SegmentedFilter<T extends string>({
   label,
+  options,
+  value,
   onSelect,
 }: {
-  readonly active: boolean;
   readonly label: string;
-  readonly onSelect: () => void;
+  readonly options: ReadonlyArray<{ readonly label: string; readonly value: T }>;
+  readonly value: T;
+  readonly onSelect: (next: T) => void;
 }) {
   return (
-    <Button
-      variant={active ? "default" : "outline"}
-      size="sm"
-      aria-pressed={active}
-      onClick={onSelect}
-    >
-      {label}
-    </Button>
+    <fieldset className="grid content-start gap-1.5">
+      <legend className="text-sm font-medium">{label}</legend>
+      <ToggleGroupPrimitive
+        value={[value]}
+        onValueChange={(next) => {
+          const first = next[0];
+          if (first !== undefined) {
+            onSelect(first);
+          }
+        }}
+        className={segmentedControlRootClassName}
+      >
+        {options.map((option) => (
+          <TogglePrimitive
+            key={option.value}
+            value={option.value}
+            className={segmentedControlItemVariants({ size: "sm", state: "pressed" })}
+          >
+            {option.label}
+          </TogglePrimitive>
+        ))}
+      </ToggleGroupPrimitive>
+    </fieldset>
   );
+}
+
+function SortIcon({ direction }: { readonly direction: "asc" | "desc" | false }) {
+  if (direction === "asc") {
+    return <ArrowUp aria-hidden className="size-3.5" />;
+  }
+  if (direction === "desc") {
+    return <ArrowDown aria-hidden className="size-3.5" />;
+  }
+  return <ArrowUpDown aria-hidden className="size-3.5 opacity-50" />;
 }

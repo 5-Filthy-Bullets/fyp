@@ -623,6 +623,53 @@ describe("ticket.assign", () => {
   });
 });
 
+describe("ticket.listTechnicians", () => {
+  const techContext = (fake: ReturnType<typeof fakeDatabase>) => ({
+    headers,
+    auth: authWithSession({
+      name: "Toni Alvarez",
+      role: "technician" as const,
+      organizationId: null,
+    }),
+    db: fake.db,
+  });
+
+  it("returns technicians name-sorted, without banned accounts in the query", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([
+      ["tech-2", "Zoe Park", "zoe@reliable.test"],
+      ["tech-1", "Toni Alvarez", "toni@reliable.test"],
+    ]);
+
+    const list = router.ticket.listTechnicians.callable({ context: techContext(fake) });
+
+    await expect(list({})).resolves.toEqual({
+      technicians: [
+        { email: "zoe@reliable.test", id: "tech-2", name: "Zoe Park" },
+        { email: "toni@reliable.test", id: "tech-1", name: "Toni Alvarez" },
+      ],
+    });
+    expect(fake.queries[0]?.sql).toContain('"user"."banned"');
+    expect(fake.queries[0]?.sql).toContain('order by "user"."name"');
+  });
+
+  it("refuses client accounts", async () => {
+    const list = router.ticket.listTechnicians.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Dana Okafor",
+          role: "client",
+          organizationId: "org-acme",
+        }),
+        db: fakeDatabase().db,
+      },
+    });
+
+    await expect(list({})).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+});
+
 describe("ticket.escalate", () => {
   const staffContext = (fake: ReturnType<typeof fakeDatabase>) => ({
     headers,
@@ -1255,9 +1302,7 @@ describe("admin.org", () => {
     // Wholesale means the old links are deleted before the new ones land.
     const clear = fake.queries.find((query) => query.sql.startsWith('delete from "org_product"'));
     expect(clear?.params).toEqual(["org-acme"]);
-    const links = fake.queries.filter((query) =>
-      query.sql.startsWith('insert into "org_product"'),
-    );
+    const links = fake.queries.filter((query) => query.sql.startsWith('insert into "org_product"'));
     expect(links.map((query) => query.params)).toEqual([
       ["org-acme", "prod-line-9"],
       ["org-acme", "prod-scan-2"],
@@ -1292,9 +1337,7 @@ describe("admin.org", () => {
     expect(result.organization.isActive).toBe(false);
     expect(result.message).toContain("deactivated");
     // Suspending must drop every member session at once, not just flip the flag.
-    const drops = fake.queries.filter((query) =>
-      query.sql.startsWith('delete from "session"'),
-    );
+    const drops = fake.queries.filter((query) => query.sql.startsWith('delete from "session"'));
     expect(drops.map((query) => query.params)).toEqual([["user-1"], ["user-2"]]);
   });
 
