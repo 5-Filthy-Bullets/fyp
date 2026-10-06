@@ -11,13 +11,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   useAdminOrg,
   useAdminOrgs,
   useAdminProducts,
   useCreateAdminProduct,
   useSetEntitlements,
 } from "@/lib/admin";
-import type { AdminProduct } from "@/lib/admin";
 
 const PAGE_SIZE = 20;
 
@@ -151,11 +158,29 @@ function ProductsList() {
               : "No products match this search."}
           </p>
         ) : (
-          <ul className="divide-y rounded-lg border">
-            {products.map((item) => (
-              <ProductRow key={item.id} item={item} />
-            ))}
-          </ul>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Product</TableHead>
+                <TableHead className="text-right">Organizations</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {products.map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell>
+                    <p className="truncate text-sm font-medium">{item.name}</p>
+                    <p className="truncate text-xs text-muted-foreground">{item.slug}</p>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Badge variant="secondary">
+                      {item.organizationCount} {item.organizationCount === 1 ? "org" : "orgs"}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         )}
         {pageCount > 1 && (
           <div className="flex items-center justify-between">
@@ -184,20 +209,6 @@ function ProductsList() {
         )}
       </CardPanel>
     </Card>
-  );
-}
-
-function ProductRow({ item }: { readonly item: AdminProduct }) {
-  return (
-    <li className="flex flex-wrap items-center justify-between gap-2 px-4 py-3.5">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium">{item.name}</p>
-        <p className="truncate text-xs text-muted-foreground">{item.slug}</p>
-      </div>
-      <Badge variant="secondary">
-        {item.organizationCount} {item.organizationCount === 1 ? "org" : "orgs"}
-      </Badge>
-    </li>
   );
 }
 
