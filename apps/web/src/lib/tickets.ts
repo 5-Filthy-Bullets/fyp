@@ -123,6 +123,14 @@ export const useTicketQueue = (escalatedOnly?: boolean) =>
     }),
   );
 
+export type TechnicianPick = Awaited<
+  ReturnType<RouterClient<AppRouter>["ticket"]["listTechnicians"]>
+>["technicians"][number];
+
+/** Assignee picker: every active technician, name-sorted. */
+export const useTechnicians = () =>
+  useQuery(orpcQuery.ticket.listTechnicians.queryOptions({ input: {} }));
+
 /**
  * Status, priority, or both in one write. Claiming still fills only an empty
  * owner slot. Invalidates the queue plus every open detail read.
