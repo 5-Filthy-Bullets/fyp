@@ -7,7 +7,6 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import type { SortingState } from "@tanstack/react-table";
 import { Toggle as TogglePrimitive } from "@base-ui/react/toggle";
 import { ToggleGroup as ToggleGroupPrimitive } from "@base-ui/react/toggle-group";
 import { ArrowDown, ArrowUp, ArrowUpDown, Inbox, Search, TicketPlus, X } from "lucide-react";
@@ -41,13 +40,13 @@ import {
   ticketPriorities,
   ticketStatuses,
 } from "@/lib/tickets";
-import type { Ticket, TicketListSearch, TicketPriority, TicketStatus } from "@/lib/tickets";
+import type { Ticket, TicketListSearch, TicketStatus } from "@/lib/tickets";
 import { useMyTickets, useTicketQueue } from "@/lib/tickets";
+import { ALL_PRIORITIES, useTicketListStore } from "@/stores/ticket-list-store";
+import type { TicketPriorityFilter } from "@/stores/ticket-list-store";
 
-const PAGE_SIZE = 10;
 const SEARCH_DEBOUNCE_MS = 250;
 const ALL_STATUSES = "all";
-const ALL_PRIORITIES = "all";
 const SCOPE_QUEUE = "queue";
 const SCOPE_MINE = "mine";
 const SCOPE_ALL = "all";
@@ -56,7 +55,7 @@ const SCOPE_ESCALATED = "escalated";
 type TechScope = "queue" | "mine";
 type AdminScope = "all" | "escalated";
 type StatusFilter = TicketStatus | typeof ALL_STATUSES;
-type PriorityFilter = TicketPriority | typeof ALL_PRIORITIES;
+type PriorityFilter = TicketPriorityFilter;
 
 const columnHelper = createColumnHelper<Ticket>();
 
@@ -192,9 +191,16 @@ function TicketsList() {
     });
   }, [needsTechScope, needsAdminScope, navigate]);
 
-  const [priority, setPriority] = useState<PriorityFilter>(ALL_PRIORITIES);
-  const [sorting, setSorting] = useState<SortingState>([{ desc: true, id: "createdAt" }]);
-  const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: PAGE_SIZE });
+  // Priority, sorting, and pagination live in the ticket-list store so the
+  // filter controls subscribe narrowly instead of re-rendering the whole
+  // list on every tweak. q/status/scope stay in the URL (shared links).
+  const priority = useTicketListStore((state) => state.priority);
+  const setPriority = useTicketListStore((state) => state.setPriority);
+  const sorting = useTicketListStore((state) => state.sorting);
+  const setSorting = useTicketListStore((state) => state.setSorting);
+  const pagination = useTicketListStore((state) => state.pagination);
+  const setPagination = useTicketListStore((state) => state.setPagination);
+  const resetPage = useTicketListStore((state) => state.resetPage);
 
   const clientQuery = useMyTickets();
   const staffQuery = useTicketQueue(
@@ -277,16 +283,19 @@ function TicketsList() {
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    onPaginationChange: setPagination,
-    onSortingChange: setSorting,
+    // The table hands over updaters; resolve them against the store first.
+    onPaginationChange: (updater) =>
+      setPagination(typeof updater === "function" ? updater(pagination) : updater),
+    onSortingChange: (updater) =>
+      setSorting(typeof updater === "function" ? updater(sorting) : updater),
     state: { pagination, sorting },
   });
 
   // A filter change can strand the page past the last page, so jump back.
   // Pagination stays put across background refetches and re-sorts.
   useEffect(() => {
-    setPagination((prev) => (prev.pageIndex === 0 ? prev : { ...prev, pageIndex: 0 }));
-  }, [debouncedQuery, scope, status, priority, techScope, adminScope, role]);
+    resetPage();
+  }, [debouncedQuery, scope, status, priority, techScope, adminScope, role, resetPage]);
 
   const pageCount = table.getPageCount();
   const pageIndex = table.getState().pagination.pageIndex;

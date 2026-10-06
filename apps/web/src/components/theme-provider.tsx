@@ -1,47 +1,26 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import type { ReactNode } from "react";
-import {
-  THEME_STORAGE_KEY,
-  ThemeContext,
-  applyTheme,
-  readStoredTheme,
-  resolveTheme,
-} from "@/lib/theme";
-import type { ResolvedTheme, Theme } from "@/lib/theme";
+import { useThemeStore } from "@/stores/theme-store";
 
 /**
- * Light/dark/system theming on top of the vendored `.dark` tokens. Persists
- * in localStorage and flips the `dark` class, so the toggle applies instantly.
+ * Sync layer over the theme store: applies the stored choice on mount and
+ * re-resolves when the OS setting changes while `theme` is "system". Renders
+ * no context, so toggling the theme never re-renders the tree — only
+ * components selecting `resolved`/`theme` update.
  */
 export function ThemeProvider({ children }: { readonly children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(readStoredTheme);
-  const [resolved, setResolved] = useState<ResolvedTheme>(() => resolveTheme(readStoredTheme()));
+  const theme = useThemeStore((state) => state.theme);
+  const refreshResolved = useThemeStore((state) => state.refreshResolved);
 
   useEffect(() => {
-    const update = () => {
-      const next = resolveTheme(theme);
-      applyTheme(next);
-      setResolved(next);
-    };
-    update();
+    refreshResolved();
     if (theme !== "system") {
       return;
     }
     const media = window.matchMedia("(prefers-color-scheme: dark)");
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, [theme]);
+    media.addEventListener("change", refreshResolved);
+    return () => media.removeEventListener("change", refreshResolved);
+  }, [theme, refreshResolved]);
 
-  const setTheme = (next: Theme) => {
-    try {
-      localStorage.setItem(THEME_STORAGE_KEY, next);
-    } catch {
-      // Private browsing can block storage; the theme still applies in memory.
-    }
-    setThemeState(next);
-  };
-
-  return (
-    <ThemeContext.Provider value={{ theme, resolved, setTheme }}>{children}</ThemeContext.Provider>
-  );
+  return <>{children}</>;
 }
