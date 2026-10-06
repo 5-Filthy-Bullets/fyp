@@ -34,6 +34,7 @@ describe("openapi spec", () => {
       "/products",
       "/tickets",
       "/tickets/mine",
+      "/tickets/technicians",
       "/tickets/{ticketId}",
       "/tickets/{ticketId}/assignee",
       "/tickets/{ticketId}/escalation",
