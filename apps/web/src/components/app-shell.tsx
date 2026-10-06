@@ -21,14 +21,15 @@ import {
   Wrench,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import type { ReactNode } from "react";
 import { authClient } from "@/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useCaller } from "@/lib/session";
 import type { Role } from "@/lib/session";
-import { useTheme } from "@/lib/theme";
+import { useShellStore } from "@/stores/shell-store";
+import { useThemeStore } from "@/stores/theme-store";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -96,8 +97,10 @@ const shellTitle: Record<Role, string> = {
  */
 export function AppShell({ children }: { readonly children: ReactNode }) {
   const { role, session } = useCaller();
-  const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const collapsed = useShellStore((state) => state.collapsed);
+  const mobileOpen = useShellStore((state) => state.mobileOpen);
+  const toggleCollapsed = useShellStore((state) => state.toggleCollapsed);
+  const setMobileOpen = useShellStore((state) => state.setMobileOpen);
 
   // Close the mobile drawer on Escape and lock body scroll while it is open.
   useEffect(() => {
@@ -116,7 +119,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
       document.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = previousOverflow;
     };
-  }, [mobileOpen]);
+  }, [mobileOpen, setMobileOpen]);
 
   // Never flash another role's nav while the session loads.
   if (role === undefined) {
@@ -176,7 +179,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar
           collapsed={collapsed}
-          onToggleCollapse={() => setCollapsed((prev) => !prev)}
+          onToggleCollapse={toggleCollapsed}
           onOpenMobile={() => setMobileOpen(true)}
         />
         <main id="main-content" className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6">
@@ -398,7 +401,8 @@ function Topbar({
 }
 
 function ThemeToggleButton() {
-  const { resolved, setTheme } = useTheme();
+  const resolved = useThemeStore((state) => state.resolved);
+  const setTheme = useThemeStore((state) => state.setTheme);
   const dark = resolved === "dark";
 
   return (
