@@ -111,9 +111,12 @@ function LoginForm() {
                 placeholder="you@company.example"
                 autoComplete="email"
                 aria-invalid={fieldErrors.email !== undefined}
+                aria-describedby={fieldErrors.email !== undefined ? "email-error" : undefined}
               />
               {fieldErrors.email !== undefined && (
-                <p className="text-sm text-destructive">{fieldErrors.email}</p>
+                <p id="email-error" role="alert" className="text-sm text-destructive">
+                  {fieldErrors.email}
+                </p>
               )}
             </div>
             <div className="grid gap-1.5">
@@ -125,9 +128,12 @@ function LoginForm() {
                 type="password"
                 autoComplete="current-password"
                 aria-invalid={fieldErrors.password !== undefined}
+                aria-describedby={fieldErrors.password !== undefined ? "password-error" : undefined}
               />
               {fieldErrors.password !== undefined && (
-                <p className="text-sm text-destructive">{fieldErrors.password}</p>
+                <p id="password-error" role="alert" className="text-sm text-destructive">
+                  {fieldErrors.password}
+                </p>
               )}
             </div>
             {submitError !== null && (

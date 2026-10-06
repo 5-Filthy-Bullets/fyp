@@ -145,6 +145,27 @@ function TicketsList() {
     }
   }, [escalatedFromUrl, role]);
 
+  // Canonical staff scope URLs: a bare /tickets means "queue" for technicians
+  // and "all" (?escalated=false) for admins. Writing it into the URL keeps the
+  // sidebar highlight, the scope tabs, and shared links in agreement instead
+  // of leaving a param-less URL no nav entry owns.
+  const needsTechScope = role === "technician" && search.scope === undefined;
+  const needsAdminScope = role === "admin" && search.escalated === undefined;
+  useEffect(() => {
+    if (!needsTechScope && !needsAdminScope) {
+      return;
+    }
+    void navigate({
+      to: "/tickets",
+      search: (prev) => ({
+        ...prev,
+        ...(needsTechScope ? { scope: SCOPE_QUEUE } : {}),
+        ...(needsAdminScope ? { escalated: "false" } : {}),
+      }),
+      replace: true,
+    });
+  }, [needsTechScope, needsAdminScope, navigate]);
+
   const [page, setPage] = useState(1);
 
   const clientQuery = useMyTickets();
