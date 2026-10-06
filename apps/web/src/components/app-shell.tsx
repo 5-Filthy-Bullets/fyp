@@ -1,4 +1,4 @@
-import { Link, useLocation, useNavigate, useSearch } from "@tanstack/react-router";
+import { Link, useLocation } from "@tanstack/react-router";
 import { Menu } from "@base-ui/react/menu";
 import { Separator } from "@base-ui/react/separator";
 import {
@@ -13,7 +13,6 @@ import {
   Menu as MenuIcon,
   Moon,
   Package,
-  Search,
   Sun,
   Ticket,
   TicketPlus,
@@ -23,11 +22,10 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { authClient } from "@/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useCaller } from "@/lib/session";
 import type { Role } from "@/lib/session";
 import { useTheme } from "@/lib/theme";
@@ -390,67 +388,12 @@ function Topbar({
             aria-hidden
           />
         </Button>
-        <SearchBox />
         <div className="ml-auto flex items-center gap-1">
           <ThemeToggleButton />
           <AvatarMenu />
         </div>
       </div>
     </header>
-  );
-}
-
-/**
- * Global ticket search, parked in ?q= on the ticket list route. Typing here
- * jumps to /tickets so the list owns the filter.
- */
-function SearchBox() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const routeQuery = useSearch({ strict: false }) as { readonly q?: unknown };
-  const urlQuery = typeof routeQuery.q === "string" ? routeQuery.q : "";
-  const [value, setValue] = useState(urlQuery);
-
-  // The list owns ?q= (topbar parks it, list filters + debounces it), so sync
-  // the box when the URL changes underneath (back/forward, tab switches).
-  useEffect(() => {
-    setValue(urlQuery);
-  }, [urlQuery]);
-
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const trimmed = value.trim();
-    if (location.pathname.startsWith("/tickets")) {
-      void navigate({
-        to: "/tickets",
-        search: (prev) => (trimmed === "" ? { ...prev, q: undefined } : { ...prev, q: trimmed }),
-        replace: true,
-      });
-      return;
-    }
-    void navigate({
-      to: "/tickets",
-      search: trimmed === "" ? {} : { q: trimmed },
-    });
-  };
-
-  return (
-    <form onSubmit={submit} role="search" className="w-full max-w-xs flex-1 sm:flex-none">
-      <div className="relative">
-        <Search
-          className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
-          aria-hidden
-        />
-        <Input
-          type="search"
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-          placeholder="Search tickets…"
-          aria-label="Search tickets"
-          className="pl-8"
-        />
-      </div>
-    </form>
   );
 }
 
