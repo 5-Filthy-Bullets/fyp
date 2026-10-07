@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type { RouterClient } from "@orpc/server";
 import type { AppRouter } from "../../../api/src/router";
 import { orpcQuery } from "@/query";
@@ -131,15 +132,111 @@ export type TechnicianPick = Awaited<
 export const useTechnicians = () =>
   useQuery(orpcQuery.ticket.listTechnicians.queryOptions({ input: {} }));
 
+/** Cache shapes mirror the router outputs, so optimistic patches stay typed. */
+interface TicketListCache {
+  readonly tickets: Ticket[];
+}
+
+interface TicketDetailCache {
+  readonly ticket: Ticket;
+  readonly messages: TicketMessage[];
+}
+
+interface MessageListCache {
+  readonly messages: TicketMessage[];
+}
+
+type TicketCacheSnapshot = readonly (readonly [QueryKey, unknown])[];
+
+/** Snapshots every ticket cache before a guess, for rollback on failure. */
+const snapshotTicketCaches = (queryClient: QueryClient): TicketCacheSnapshot => [
+  ...queryClient.getQueriesData({ queryKey: orpcQuery.ticket.list.key() }),
+  ...queryClient.getQueriesData({ queryKey: orpcQuery.ticket.listMine.key() }),
+  ...queryClient.getQueriesData({ queryKey: orpcQuery.ticket.get.key() }),
+];
+
+const restoreSnapshot = (queryClient: QueryClient, snapshot: TicketCacheSnapshot): void => {
+  for (const [key, data] of snapshot) {
+    queryClient.setQueryData(key, data);
+  }
+};
+
+/** Applies a field guess to one ticket in every list and detail cache. */
+const patchTicketCaches = (
+  queryClient: QueryClient,
+  ticketId: string,
+  patch: Partial<Ticket>,
+): void => {
+  const patchList = (old: TicketListCache | undefined): TicketListCache | undefined =>
+    old === undefined
+      ? old
+      : {
+          tickets: old.tickets.map((item) => (item.id === ticketId ? { ...item, ...patch } : item)),
+        };
+  queryClient.setQueriesData<TicketListCache>({ queryKey: orpcQuery.ticket.list.key() }, patchList);
+  queryClient.setQueriesData<TicketListCache>(
+    { queryKey: orpcQuery.ticket.listMine.key() },
+    patchList,
+  );
+  queryClient.setQueriesData<TicketDetailCache>({ queryKey: orpcQuery.ticket.get.key() }, (old) =>
+    old === undefined || old.ticket.id !== ticketId
+      ? old
+      : { ...old, ticket: { ...old.ticket, ...patch } },
+  );
+};
+
+/** Replaces one ticket with the server truth once the write lands. */
+const writeTicketCaches = (queryClient: QueryClient, ticket: Ticket): void => {
+  const writeList = (old: TicketListCache | undefined): TicketListCache | undefined =>
+    old === undefined
+      ? old
+      : { tickets: old.tickets.map((item) => (item.id === ticket.id ? ticket : item)) };
+  queryClient.setQueriesData<TicketListCache>({ queryKey: orpcQuery.ticket.list.key() }, writeList);
+  queryClient.setQueriesData<TicketListCache>(
+    { queryKey: orpcQuery.ticket.listMine.key() },
+    writeList,
+  );
+  queryClient.setQueriesData<TicketDetailCache>({ queryKey: orpcQuery.ticket.get.key() }, (old) =>
+    old === undefined || old.ticket.id !== ticket.id ? old : { ...old, ticket },
+  );
+};
+
+/** Exact cache keys for one ticket's thread, so guesses never leak sideways. */
+const threadKeyFor = (ticketId: string): QueryKey =>
+  orpcQuery.ticket.listMessages.queryOptions({ input: { ticketId } }).queryKey;
+
+const detailKeyFor = (ticketId: string): QueryKey =>
+  orpcQuery.ticket.get.queryOptions({ input: { ticketId } }).queryKey;
+
 /**
  * Status, priority, or both in one write. Claiming still fills only an empty
- * owner slot. Invalidates the queue plus every open detail read.
+ * owner slot. Applies the guess to every ticket cache at once, rolls it back
+ * when the write fails, then converges on the server truth.
  */
 export const useSetTicketStatus = () => {
   const queryClient = useQueryClient();
 
   return useMutation(
     orpcQuery.ticket.setStatus.mutationOptions({
+      onMutate: async (input) => {
+        await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.list.key() });
+        await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.listMine.key() });
+        await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.get.key() });
+        const previous = snapshotTicketCaches(queryClient);
+        patchTicketCaches(queryClient, input.ticketId, {
+          ...(input.status === undefined ? {} : { status: input.status }),
+          ...(input.priority === undefined ? {} : { priority: input.priority }),
+        });
+        return { previous };
+      },
+      onError: (_error, _input, context) => {
+        if (context !== undefined) {
+          restoreSnapshot(queryClient, context.previous);
+        }
+      },
+      onSuccess: (result) => {
+        writeTicketCaches(queryClient, result.ticket);
+      },
       onSettled: async () => {
         await queryClient.invalidateQueries({ queryKey: orpcQuery.ticket.list.key() });
         await queryClient.invalidateQueries({ queryKey: orpcQuery.ticket.get.key() });
@@ -149,12 +246,28 @@ export const useSetTicketStatus = () => {
   );
 };
 
-/** Hands a ticket to a chosen technician. Detail reads invalidate the same way. */
+/** Hands a ticket to a chosen technician, guessed up front like status moves. */
 export const useAssignTicket = () => {
   const queryClient = useQueryClient();
 
   return useMutation(
     orpcQuery.ticket.assign.mutationOptions({
+      onMutate: async (input) => {
+        await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.list.key() });
+        await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.listMine.key() });
+        await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.get.key() });
+        const previous = snapshotTicketCaches(queryClient);
+        patchTicketCaches(queryClient, input.ticketId, { assignedTo: input.assigneeId });
+        return { previous };
+      },
+      onError: (_error, _input, context) => {
+        if (context !== undefined) {
+          restoreSnapshot(queryClient, context.previous);
+        }
+      },
+      onSuccess: (result) => {
+        writeTicketCaches(queryClient, result.ticket);
+      },
       onSettled: async () => {
         await queryClient.invalidateQueries({ queryKey: orpcQuery.ticket.list.key() });
         await queryClient.invalidateQueries({ queryKey: orpcQuery.ticket.get.key() });
@@ -163,12 +276,31 @@ export const useAssignTicket = () => {
   );
 };
 
-/** Flags a ticket for admin review with a short reason. */
+/** Flags a ticket for admin review, guessed up front like status moves. */
 export const useEscalateTicket = () => {
   const queryClient = useQueryClient();
 
   return useMutation(
     orpcQuery.ticket.escalate.mutationOptions({
+      onMutate: async (input) => {
+        await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.list.key() });
+        await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.listMine.key() });
+        await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.get.key() });
+        const previous = snapshotTicketCaches(queryClient);
+        patchTicketCaches(queryClient, input.ticketId, {
+          escalated: true,
+          escalatedReason: input.reason,
+        });
+        return { previous };
+      },
+      onError: (_error, _input, context) => {
+        if (context !== undefined) {
+          restoreSnapshot(queryClient, context.previous);
+        }
+      },
+      onSuccess: (result) => {
+        writeTicketCaches(queryClient, result.ticket);
+      },
       onSettled: async () => {
         await queryClient.invalidateQueries({ queryKey: orpcQuery.ticket.list.key() });
         await queryClient.invalidateQueries({ queryKey: orpcQuery.ticket.get.key() });
@@ -195,12 +327,62 @@ export const useTicketMessages = (ticketId: string) =>
     }),
   );
 
-/** Posts a reply (or staff-only internal note) and refreshes the thread. */
+/** Posts a reply (or staff-only internal note) with the message guessed up front. */
 export const usePostTicketMessage = () => {
   const queryClient = useQueryClient();
 
   return useMutation(
     orpcQuery.ticket.postMessage.mutationOptions({
+      onMutate: async (input) => {
+        const threadKey = threadKeyFor(input.ticketId);
+        const detailKey = detailKeyFor(input.ticketId);
+        await queryClient.cancelQueries({ queryKey: threadKey });
+        await queryClient.cancelQueries({ queryKey: detailKey });
+        const previousThread = queryClient.getQueryData<MessageListCache>(threadKey);
+        const previousDetail = queryClient.getQueryData<TicketDetailCache>(detailKey);
+        const optimistic: TicketMessage = {
+          id: crypto.randomUUID(),
+          authorId: null,
+          content: input.content,
+          visibility: input.visibility ?? "public",
+          createdAt: new Date().toISOString(),
+        };
+        queryClient.setQueryData<MessageListCache>(threadKey, (old) =>
+          old === undefined ? old : { messages: [...old.messages, optimistic] },
+        );
+        queryClient.setQueryData<TicketDetailCache>(detailKey, (old) =>
+          old === undefined ? old : { ...old, messages: [...old.messages, optimistic] },
+        );
+        return {
+          previousThread,
+          previousDetail,
+          threadKey,
+          detailKey,
+          optimisticId: optimistic.id,
+        };
+      },
+      onError: (_error, _input, context) => {
+        if (context === undefined) {
+          return;
+        }
+        queryClient.setQueryData(context.threadKey, context.previousThread);
+        queryClient.setQueryData(context.detailKey, context.previousDetail);
+      },
+      onSuccess: (result, _input, context) => {
+        if (context === undefined) {
+          return;
+        }
+        const swap = (messages: TicketMessage[]): TicketMessage[] => [
+          ...messages.filter((message) => message.id !== context.optimisticId),
+          result.message,
+        ];
+        queryClient.setQueryData<MessageListCache>(context.threadKey, (old) =>
+          old === undefined ? old : { messages: swap(old.messages) },
+        );
+        queryClient.setQueryData<TicketDetailCache>(context.detailKey, (old) =>
+          old === undefined ? old : { ...old, messages: swap(old.messages) },
+        );
+      },
       onSettled: async () => {
         await queryClient.invalidateQueries({ queryKey: orpcQuery.ticket.get.key() });
         await queryClient.invalidateQueries({
