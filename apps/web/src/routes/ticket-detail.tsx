@@ -223,19 +223,24 @@ function Composer({ ticketId, isStaff }: { readonly ticketId: string; readonly i
       return;
     }
 
+    // Snapshot the draft and clear at once: the optimistic row already
+    // shows the reply, so holding the text until the ack lands just
+    // looks stuck. A failed send puts the draft back for retry.
+    const draft = parsed.data.content;
+    const draftInternal = isStaff && internal;
     setError(null);
+    setContent("");
+    setInternal(false);
     post.mutate(
       {
         ticketId,
-        content: parsed.data.content,
-        ...(isStaff && internal ? { visibility: "internal" as const } : {}),
+        content: draft,
+        ...(draftInternal ? { visibility: "internal" as const } : {}),
       },
       {
-        onSuccess: () => {
-          setContent("");
-          setInternal(false);
-        },
         onError: (mutationError) => {
+          setContent(draft);
+          setInternal(draftInternal);
           setError(
             mutationError instanceof Error ? mutationError.message : "The reply was not sent.",
           );
@@ -549,15 +554,19 @@ function EscalateForm({ ticketId }: { readonly ticketId: string }) {
       return;
     }
 
+    // Same snapshot-and-clear as the reply composer: the escalated flag
+    // already shows, so the form closes at once and a failed write
+    // reopens it with the reason intact.
+    const draft = parsed.data.reason;
     setError(null);
+    setReason("");
+    setOpen(false);
     escalate.mutate(
-      { ticketId, reason: parsed.data.reason },
+      { ticketId, reason: draft },
       {
-        onSuccess: () => {
-          setReason("");
-          setOpen(false);
-        },
         onError: (mutationError) => {
+          setReason(draft);
+          setOpen(true);
           setError(
             mutationError instanceof Error
               ? mutationError.message
