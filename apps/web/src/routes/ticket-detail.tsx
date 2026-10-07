@@ -289,7 +289,7 @@ function Composer({ ticketId, isStaff }: { readonly ticketId: string; readonly i
             </p>
           )}
           <div>
-            <Button type="submit" loading={post.isPending}>
+            <Button type="submit">
               {isStaff && internal ? "Add internal note" : "Send reply"}
             </Button>
           </div>
@@ -415,7 +415,6 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
     ticket?.assignedTo === undefined || ticket.assignedTo === null
       ? null
       : (techs.find((tech) => tech.id === ticket.assignedTo)?.name ?? null);
-  const busy = setStatus.isPending || assign.isPending;
 
   return (
     <Card>
@@ -435,9 +434,7 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
           </div>
         )}
         {ticket?.assignedTo === null ? (
-          <Button onClick={claim} loading={setStatus.isPending}>
-            Claim this ticket
-          </Button>
+          <Button onClick={claim}>Claim this ticket</Button>
         ) : (
           <p className="text-sm text-muted-foreground">
             {isMine ? "You own this ticket." : `Assigned to ${assigneeName ?? "someone"}.`}
@@ -451,7 +448,7 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
             onChange={(event) =>
               changeStatus(event.target.value as (typeof ticketStatuses)[number])
             }
-            disabled={busy || ticket === undefined}
+            disabled={ticket === undefined}
             className="h-8.5 w-full rounded-lg border border-input bg-background px-3 text-base shadow-xs/5 outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 disabled:opacity-64 sm:h-7.5 sm:text-sm dark:bg-input/32"
           >
             {ticketStatuses.map((value) => (
@@ -467,7 +464,7 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
             id="priority-select"
             value={ticket?.priority ?? "low"}
             onChange={(event) => changePriority(event.target.value as TicketPriority)}
-            disabled={busy || ticket === undefined}
+            disabled={ticket === undefined}
             className="h-8.5 w-full rounded-lg border border-input bg-background px-3 text-base shadow-xs/5 outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 disabled:opacity-64 sm:h-7.5 sm:text-sm dark:bg-input/32"
           >
             {ticketPriorities.map((value) => (
@@ -517,7 +514,7 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
                   </AutocompletePopup>
                 </Autocomplete>
               </div>
-              <Button type="submit" variant="outline" loading={assign.isPending}>
+              <Button type="submit" variant="outline">
                 Assign
               </Button>
             </div>
@@ -595,7 +592,7 @@ function EscalateForm({ ticketId }: { readonly ticketId: string }) {
         </p>
       )}
       <div className="flex gap-2">
-        <Button type="submit" size="sm" loading={escalate.isPending}>
+        <Button type="submit" size="sm">
           Escalate
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>

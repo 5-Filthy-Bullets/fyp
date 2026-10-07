@@ -182,7 +182,6 @@ function ClaimRow({ ticket }: { readonly ticket: Ticket }) {
         size="sm"
         variant="outline"
         onClick={claim}
-        loading={setStatus.isPending}
         aria-label={`Claim ticket ${ticket.title}`}
       >
         Claim
