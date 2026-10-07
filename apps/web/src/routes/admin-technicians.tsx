@@ -359,7 +359,9 @@ function TechRow({ tech }: { readonly tech: AdminUser }) {
   const flipActive = () => {
     setError(null);
     setActive.mutate(
-      { userId: tech.id, active: !tech.banned },
+      // banned and active carry opposite polarity: an active account
+      // (banned false) deactivates with active false, and back.
+      { userId: tech.id, active: tech.banned },
       {
         onError: (mutationError) => {
           setError(mutationError instanceof Error ? mutationError.message : "Could not change.");
