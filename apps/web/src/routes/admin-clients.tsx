@@ -390,8 +390,8 @@ function OrgRow({ org }: { readonly org: AdminOrg }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(org.name);
   const [error, setError] = useState<string | null>(null);
-  const update = useUpdateAdminOrg();
-  const setActive = useSetOrgActive();
+  const update = useUpdateAdminOrg(org.id);
+  const setActive = useSetOrgActive(org.id);
 
   const save = () => {
     const trimmed = name.trim();
@@ -439,7 +439,7 @@ function OrgRow({ org }: { readonly org: AdminOrg }) {
               </p>
             )}
             <div className="flex gap-2">
-              <Button size="sm" loading={update.isPending} onClick={save}>
+              <Button size="sm" onClick={save}>
                 Save
               </Button>
               <Button
@@ -481,7 +481,6 @@ function OrgRow({ org }: { readonly org: AdminOrg }) {
           <Button
             size="sm"
             variant={org.isActive ? "destructive-outline" : "outline"}
-            loading={setActive.isPending}
             onClick={flipActive}
           >
             {org.isActive ? "Suspend" : "Reactivate"}

@@ -209,7 +209,7 @@ function MessageRow({ message }: { readonly message: TicketMessage }) {
 }
 
 function Composer({ ticketId, isStaff }: { readonly ticketId: string; readonly isStaff: boolean }) {
-  const post = usePostTicketMessage();
+  const post = usePostTicketMessage(ticketId);
   const [content, setContent] = useState("");
   const [internal, setInternal] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -223,19 +223,24 @@ function Composer({ ticketId, isStaff }: { readonly ticketId: string; readonly i
       return;
     }
 
+    // Snapshot the draft and clear at once: the optimistic row already
+    // shows the reply, so holding the text until the ack lands just
+    // looks stuck. A failed send puts the draft back for retry.
+    const draft = parsed.data.content;
+    const draftInternal = isStaff && internal;
     setError(null);
+    setContent("");
+    setInternal(false);
     post.mutate(
       {
         ticketId,
-        content: parsed.data.content,
-        ...(isStaff && internal ? { visibility: "internal" as const } : {}),
+        content: draft,
+        ...(draftInternal ? { visibility: "internal" as const } : {}),
       },
       {
-        onSuccess: () => {
-          setContent("");
-          setInternal(false);
-        },
         onError: (mutationError) => {
+          setContent(draft);
+          setInternal(draftInternal);
           setError(
             mutationError instanceof Error ? mutationError.message : "The reply was not sent.",
           );
@@ -289,7 +294,7 @@ function Composer({ ticketId, isStaff }: { readonly ticketId: string; readonly i
             </p>
           )}
           <div>
-            <Button type="submit" loading={post.isPending}>
+            <Button type="submit">
               {isStaff && internal ? "Add internal note" : "Send reply"}
             </Button>
           </div>
@@ -323,8 +328,8 @@ const resolveTechnicianId = (techs: readonly TechnicianPick[], text: string): st
 function ActionsCard({ ticketId }: { readonly ticketId: string }) {
   const { role, userId } = useCaller();
   const detail = useTicketDetail(ticketId);
-  const setStatus = useSetTicketStatus();
-  const assign = useAssignTicket();
+  const setStatus = useSetTicketStatus(ticketId);
+  const assign = useAssignTicket(ticketId);
   const ticket = detail.data?.ticket;
   const techsQuery = useTechnicians();
   const techs = techsQuery.data?.technicians ?? [];
@@ -415,7 +420,6 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
     ticket?.assignedTo === undefined || ticket.assignedTo === null
       ? null
       : (techs.find((tech) => tech.id === ticket.assignedTo)?.name ?? null);
-  const busy = setStatus.isPending || assign.isPending;
 
   return (
     <Card>
@@ -435,9 +439,7 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
           </div>
         )}
         {ticket?.assignedTo === null ? (
-          <Button onClick={claim} loading={setStatus.isPending}>
-            Claim this ticket
-          </Button>
+          <Button onClick={claim}>Claim this ticket</Button>
         ) : (
           <p className="text-sm text-muted-foreground">
             {isMine ? "You own this ticket." : `Assigned to ${assigneeName ?? "someone"}.`}
@@ -451,7 +453,7 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
             onChange={(event) =>
               changeStatus(event.target.value as (typeof ticketStatuses)[number])
             }
-            disabled={busy || ticket === undefined}
+            disabled={ticket === undefined}
             className="h-8.5 w-full rounded-lg border border-input bg-background px-3 text-base shadow-xs/5 outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 disabled:opacity-64 sm:h-7.5 sm:text-sm dark:bg-input/32"
           >
             {ticketStatuses.map((value) => (
@@ -467,7 +469,7 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
             id="priority-select"
             value={ticket?.priority ?? "low"}
             onChange={(event) => changePriority(event.target.value as TicketPriority)}
-            disabled={busy || ticket === undefined}
+            disabled={ticket === undefined}
             className="h-8.5 w-full rounded-lg border border-input bg-background px-3 text-base shadow-xs/5 outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 disabled:opacity-64 sm:h-7.5 sm:text-sm dark:bg-input/32"
           >
             {ticketPriorities.map((value) => (
@@ -517,7 +519,7 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
                   </AutocompletePopup>
                 </Autocomplete>
               </div>
-              <Button type="submit" variant="outline" loading={assign.isPending}>
+              <Button type="submit" variant="outline">
                 Assign
               </Button>
             </div>
@@ -538,7 +540,7 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
 }
 
 function EscalateForm({ ticketId }: { readonly ticketId: string }) {
-  const escalate = useEscalateTicket();
+  const escalate = useEscalateTicket(ticketId);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -552,15 +554,19 @@ function EscalateForm({ ticketId }: { readonly ticketId: string }) {
       return;
     }
 
+    // Same snapshot-and-clear as the reply composer: the escalated flag
+    // already shows, so the form closes at once and a failed write
+    // reopens it with the reason intact.
+    const draft = parsed.data.reason;
     setError(null);
+    setReason("");
+    setOpen(false);
     escalate.mutate(
-      { ticketId, reason: parsed.data.reason },
+      { ticketId, reason: draft },
       {
-        onSuccess: () => {
-          setReason("");
-          setOpen(false);
-        },
         onError: (mutationError) => {
+          setReason(draft);
+          setOpen(true);
           setError(
             mutationError instanceof Error
               ? mutationError.message
@@ -595,7 +601,7 @@ function EscalateForm({ ticketId }: { readonly ticketId: string }) {
         </p>
       )}
       <div className="flex gap-2">
-        <Button type="submit" size="sm" loading={escalate.isPending}>
+        <Button type="submit" size="sm">
           Escalate
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>

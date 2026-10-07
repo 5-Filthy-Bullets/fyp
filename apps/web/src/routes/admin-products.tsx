@@ -260,7 +260,7 @@ function EntitlementForm({ organizationId }: { readonly organizationId: string }
   const [checked, setChecked] = useState<readonly string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const save = useSetEntitlements();
+  const save = useSetEntitlements(organizationId);
 
   const org = orgQuery.data?.organization;
   const products = productsQuery.data?.products ?? [];
@@ -353,7 +353,7 @@ function EntitlementForm({ organizationId }: { readonly organizationId: string }
         </p>
       )}
       <div>
-        <Button size="sm" loading={save.isPending} onClick={submit}>
+        <Button size="sm" onClick={submit}>
           Save entitlements
         </Button>
       </div>

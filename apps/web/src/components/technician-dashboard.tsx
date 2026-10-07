@@ -163,7 +163,7 @@ export function TechnicianDashboard() {
 }
 
 function ClaimRow({ ticket }: { readonly ticket: Ticket }) {
-  const setStatus = useSetTicketStatus();
+  const setStatus = useSetTicketStatus(ticket.id);
 
   const claim = () => {
     setStatus.mutate({ ticketId: ticket.id, status: "in_progress" });
@@ -182,7 +182,6 @@ function ClaimRow({ ticket }: { readonly ticket: Ticket }) {
         size="sm"
         variant="outline"
         onClick={claim}
-        loading={setStatus.isPending}
         aria-label={`Claim ticket ${ticket.title}`}
       >
         Claim

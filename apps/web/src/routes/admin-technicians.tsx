@@ -335,8 +335,8 @@ function TechRow({ tech }: { readonly tech: AdminUser }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(tech.name);
   const [error, setError] = useState<string | null>(null);
-  const update = useUpdateAdminUser();
-  const setActive = useSetUserActive();
+  const update = useUpdateAdminUser(tech.id);
+  const setActive = useSetUserActive(tech.id);
 
   const save = () => {
     const trimmed = name.trim();
@@ -359,7 +359,9 @@ function TechRow({ tech }: { readonly tech: AdminUser }) {
   const flipActive = () => {
     setError(null);
     setActive.mutate(
-      { userId: tech.id, active: !tech.banned },
+      // banned and active carry opposite polarity: an active account
+      // (banned false) deactivates with active false, and back.
+      { userId: tech.id, active: tech.banned },
       {
         onError: (mutationError) => {
           setError(mutationError instanceof Error ? mutationError.message : "Could not change.");
@@ -384,7 +386,7 @@ function TechRow({ tech }: { readonly tech: AdminUser }) {
               </p>
             )}
             <div className="flex gap-2">
-              <Button size="sm" loading={update.isPending} onClick={save}>
+              <Button size="sm" onClick={save}>
                 Save
               </Button>
               <Button
@@ -423,7 +425,6 @@ function TechRow({ tech }: { readonly tech: AdminUser }) {
           <Button
             size="sm"
             variant={tech.banned ? "outline" : "destructive-outline"}
-            loading={setActive.isPending}
             onClick={flipActive}
           >
             {tech.banned ? "Reactivate" : "Deactivate"}
