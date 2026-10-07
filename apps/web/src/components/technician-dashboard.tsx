@@ -163,7 +163,7 @@ export function TechnicianDashboard() {
 }
 
 function ClaimRow({ ticket }: { readonly ticket: Ticket }) {
-  const setStatus = useSetTicketStatus();
+  const setStatus = useSetTicketStatus(ticket.id);
 
   const claim = () => {
     setStatus.mutate({ ticketId: ticket.id, status: "in_progress" });

@@ -148,6 +148,22 @@ interface MessageListCache {
 
 type TicketCacheSnapshot = readonly (readonly [QueryKey, unknown])[];
 
+/**
+ * Counts writes per ticket so a stale settle never paints over a newer
+ * guess. Rapid flips queue behind each other (see the per-ticket scope
+ * below), so only the newest write may touch the cache on the way out.
+ */
+const ticketWriteEpoch = new Map<string, number>();
+
+const nextTicketEpoch = (ticketId: string): number => {
+  const epoch = (ticketWriteEpoch.get(ticketId) ?? 0) + 1;
+  ticketWriteEpoch.set(ticketId, epoch);
+  return epoch;
+};
+
+const isLatestTicketWrite = (ticketId: string, epoch: number): boolean =>
+  ticketWriteEpoch.get(ticketId) === epoch;
+
 /** Snapshots every ticket cache before a guess, for rollback on failure. */
 const snapshotTicketCaches = (queryClient: QueryClient): TicketCacheSnapshot => [
   ...queryClient.getQueriesData({ queryKey: orpcQuery.ticket.list.key() }),
@@ -211,31 +227,37 @@ const detailKeyFor = (ticketId: string): QueryKey =>
 /**
  * Status, priority, or both in one write. Claiming still fills only an empty
  * owner slot. Applies the guess to every ticket cache at once, rolls it back
- * when the write fails, then converges on the server truth.
+ * when the write fails, then converges on the server truth. Writes for one
+ * ticket run serially in call order behind a per-ticket scope, so a panicked
+ * re-toggle never waits and the last intent always wins.
  */
-export const useSetTicketStatus = () => {
+export const useSetTicketStatus = (ticketId: string) => {
   const queryClient = useQueryClient();
 
   return useMutation(
     orpcQuery.ticket.setStatus.mutationOptions({
+      scope: { id: `ticket:${ticketId}` },
       onMutate: async (input) => {
         await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.list.key() });
         await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.listMine.key() });
         await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.get.key() });
         const previous = snapshotTicketCaches(queryClient);
+        const epoch = nextTicketEpoch(input.ticketId);
         patchTicketCaches(queryClient, input.ticketId, {
           ...(input.status === undefined ? {} : { status: input.status }),
           ...(input.priority === undefined ? {} : { priority: input.priority }),
         });
-        return { previous };
+        return { previous, epoch };
       },
-      onError: (_error, _input, context) => {
-        if (context !== undefined) {
+      onError: (_error, input, context) => {
+        if (context !== undefined && isLatestTicketWrite(input.ticketId, context.epoch)) {
           restoreSnapshot(queryClient, context.previous);
         }
       },
-      onSuccess: (result) => {
-        writeTicketCaches(queryClient, result.ticket);
+      onSuccess: (result, input, context) => {
+        if (context === undefined || isLatestTicketWrite(input.ticketId, context.epoch)) {
+          writeTicketCaches(queryClient, result.ticket);
+        }
       },
       onSettled: async () => {
         await queryClient.invalidateQueries({ queryKey: orpcQuery.ticket.list.key() });
@@ -246,27 +268,31 @@ export const useSetTicketStatus = () => {
   );
 };
 
-/** Hands a ticket to a chosen technician, guessed up front like status moves. */
-export const useAssignTicket = () => {
+/** Hands a ticket to a chosen technician, queued in the same per-ticket lane. */
+export const useAssignTicket = (ticketId: string) => {
   const queryClient = useQueryClient();
 
   return useMutation(
     orpcQuery.ticket.assign.mutationOptions({
+      scope: { id: `ticket:${ticketId}` },
       onMutate: async (input) => {
         await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.list.key() });
         await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.listMine.key() });
         await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.get.key() });
         const previous = snapshotTicketCaches(queryClient);
+        const epoch = nextTicketEpoch(input.ticketId);
         patchTicketCaches(queryClient, input.ticketId, { assignedTo: input.assigneeId });
-        return { previous };
+        return { previous, epoch };
       },
-      onError: (_error, _input, context) => {
-        if (context !== undefined) {
+      onError: (_error, input, context) => {
+        if (context !== undefined && isLatestTicketWrite(input.ticketId, context.epoch)) {
           restoreSnapshot(queryClient, context.previous);
         }
       },
-      onSuccess: (result) => {
-        writeTicketCaches(queryClient, result.ticket);
+      onSuccess: (result, input, context) => {
+        if (context === undefined || isLatestTicketWrite(input.ticketId, context.epoch)) {
+          writeTicketCaches(queryClient, result.ticket);
+        }
       },
       onSettled: async () => {
         await queryClient.invalidateQueries({ queryKey: orpcQuery.ticket.list.key() });
@@ -276,30 +302,34 @@ export const useAssignTicket = () => {
   );
 };
 
-/** Flags a ticket for admin review, guessed up front like status moves. */
-export const useEscalateTicket = () => {
+/** Flags a ticket for admin review, queued in the same per-ticket lane. */
+export const useEscalateTicket = (ticketId: string) => {
   const queryClient = useQueryClient();
 
   return useMutation(
     orpcQuery.ticket.escalate.mutationOptions({
+      scope: { id: `ticket:${ticketId}` },
       onMutate: async (input) => {
         await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.list.key() });
         await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.listMine.key() });
         await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.get.key() });
         const previous = snapshotTicketCaches(queryClient);
+        const epoch = nextTicketEpoch(input.ticketId);
         patchTicketCaches(queryClient, input.ticketId, {
           escalated: true,
           escalatedReason: input.reason,
         });
-        return { previous };
+        return { previous, epoch };
       },
-      onError: (_error, _input, context) => {
-        if (context !== undefined) {
+      onError: (_error, input, context) => {
+        if (context !== undefined && isLatestTicketWrite(input.ticketId, context.epoch)) {
           restoreSnapshot(queryClient, context.previous);
         }
       },
-      onSuccess: (result) => {
-        writeTicketCaches(queryClient, result.ticket);
+      onSuccess: (result, input, context) => {
+        if (context === undefined || isLatestTicketWrite(input.ticketId, context.epoch)) {
+          writeTicketCaches(queryClient, result.ticket);
+        }
       },
       onSettled: async () => {
         await queryClient.invalidateQueries({ queryKey: orpcQuery.ticket.list.key() });
@@ -328,11 +358,12 @@ export const useTicketMessages = (ticketId: string) =>
   );
 
 /** Posts a reply (or staff-only internal note) with the message guessed up front. */
-export const usePostTicketMessage = () => {
+export const usePostTicketMessage = (ticketId: string) => {
   const queryClient = useQueryClient();
 
   return useMutation(
     orpcQuery.ticket.postMessage.mutationOptions({
+      scope: { id: `ticket:${ticketId}` },
       onMutate: async (input) => {
         const threadKey = threadKeyFor(input.ticketId);
         const detailKey = detailKeyFor(input.ticketId);

@@ -209,7 +209,7 @@ function MessageRow({ message }: { readonly message: TicketMessage }) {
 }
 
 function Composer({ ticketId, isStaff }: { readonly ticketId: string; readonly isStaff: boolean }) {
-  const post = usePostTicketMessage();
+  const post = usePostTicketMessage(ticketId);
   const [content, setContent] = useState("");
   const [internal, setInternal] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -323,8 +323,8 @@ const resolveTechnicianId = (techs: readonly TechnicianPick[], text: string): st
 function ActionsCard({ ticketId }: { readonly ticketId: string }) {
   const { role, userId } = useCaller();
   const detail = useTicketDetail(ticketId);
-  const setStatus = useSetTicketStatus();
-  const assign = useAssignTicket();
+  const setStatus = useSetTicketStatus(ticketId);
+  const assign = useAssignTicket(ticketId);
   const ticket = detail.data?.ticket;
   const techsQuery = useTechnicians();
   const techs = techsQuery.data?.technicians ?? [];
@@ -538,7 +538,7 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
 }
 
 function EscalateForm({ ticketId }: { readonly ticketId: string }) {
-  const escalate = useEscalateTicket();
+  const escalate = useEscalateTicket(ticketId);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
