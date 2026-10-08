@@ -271,6 +271,10 @@ const slugify = (value: string): string =>
  * the server-owned role and org onto that row. Public sign-up can never set
  * those fields itself (`input: false` in auth.ts), so writing them here is
  * what keeps admin-created accounts in the same shape as seeded ones.
+ *
+ * Neon HTTP has no transactional sign-up, so a failed stamp removes the
+ * just-created user row. Deleting the user cascades to its account and
+ * session rows, which is what lets a retry reuse the same email.
  */
 const insertCredentialUser = async (
   db: Database,
@@ -288,10 +292,19 @@ const insertCredentialUser = async (
   });
   const id = created.user.id;
 
-  await db
-    .update(user)
-    .set({ role: input.role, organizationId: input.organizationId })
-    .where(eq(user.id, id));
+  try {
+    await db
+      .update(user)
+      .set({ role: input.role, organizationId: input.organizationId })
+      .where(eq(user.id, id));
+  } catch (error) {
+    try {
+      await db.delete(user).where(eq(user.id, id));
+    } catch {
+      // Best effort: the stamp already failed, so the delete only avoids an orphan.
+    }
+    throw error;
+  }
 
   return id;
 };
@@ -1234,7 +1247,13 @@ export const adminUserRouter = {
       const orgId = crypto.randomUUID();
       await context.db.insert(organization).values({ id: orgId, name: input.orgName, slug });
 
-      let userId: string;
+      // Neon HTTP cannot wrap the org row, the better-auth sign-up, and the
+      // entitlement links in one transaction, so every step after this point
+      // cleans up after itself. The user row goes first since it references
+      // the org; deleting it cascades to its account and session rows, which
+      // is what lets a retry reuse the same email instead of hitting a
+      // duplicate conflict.
+      let userId: string | null = null;
       try {
         userId = await insertCredentialUser(context.db, context.auth, {
           name: input.name,
@@ -1243,36 +1262,53 @@ export const adminUserRouter = {
           role: "client",
           organizationId: orgId,
         });
+
+        for (const productId of input.productIds) {
+          await context.db
+            .insert(orgProduct)
+            .values({ organizationId: orgId, productId })
+            .onConflictDoNothing();
+        }
+
+        const created = await selectUserById(context.db, userId);
+        if (!created) {
+          throw new ORPCError("INTERNAL_SERVER_ERROR", {
+            message: "The client was created but could not be read back.",
+          });
+        }
+        return {
+          user: toUserOutput(created),
+          organization: {
+            id: orgId,
+            name: input.orgName,
+            slug,
+            isActive: true,
+            memberCount: 1,
+            productCount: input.productIds.length,
+            productIds: input.productIds,
+          },
+        };
       } catch (error) {
-        await context.db.delete(organization).where(eq(organization.id, orgId));
+        if (userId !== null) {
+          try {
+            await context.db.delete(user).where(eq(user.id, userId));
+          } catch {
+            // Best effort: the flow already failed, so this only avoids an orphan.
+          }
+        }
+        try {
+          await context.db.delete(organization).where(eq(organization.id, orgId));
+        } catch {
+          // Best effort, same as above.
+        }
+        if (userId === null) {
+          throw toAdminError(error, "The client account could not be created.");
+        }
+        if (error instanceof ORPCError) {
+          throw error;
+        }
         throw toAdminError(error, "The client account could not be created.");
       }
-
-      for (const productId of input.productIds) {
-        await context.db
-          .insert(orgProduct)
-          .values({ organizationId: orgId, productId })
-          .onConflictDoNothing();
-      }
-
-      const created = await selectUserById(context.db, userId);
-      if (!created) {
-        throw new ORPCError("INTERNAL_SERVER_ERROR", {
-          message: "The client was created but could not be read back.",
-        });
-      }
-      return {
-        user: toUserOutput(created),
-        organization: {
-          id: orgId,
-          name: input.orgName,
-          slug,
-          isActive: true,
-          memberCount: 1,
-          productCount: input.productIds.length,
-          productIds: input.productIds,
-        },
-      };
     }),
 
   /**
