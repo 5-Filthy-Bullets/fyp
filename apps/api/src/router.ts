@@ -577,7 +577,10 @@ export const ticketRouter = {
           .min(1)
           .optional()
           .describe("Optional client organization filter"),
-        escalatedOnly: z.boolean().optional().describe("Only tickets escalated for admin review"),
+        escalatedOnly: z
+          .union([z.boolean(), z.stringbool()])
+          .optional()
+          .describe("Only tickets escalated for admin review"),
       }),
     )
     .output(z.object({ tickets: z.array(ticketOutput) }))
