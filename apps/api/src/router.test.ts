@@ -1462,4 +1462,31 @@ describe("admin.user.createClient", () => {
       code: "BAD_REQUEST",
     });
   });
+
+  it("removes the org and the auth user when the final readback fails", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([]);
+    fake.queueRows([]);
+    fake.queueRows([["prod-line-9"]]);
+    fake.queueRows([]);
+    queueSignUpUser("client-new");
+    fake.queueRows([]);
+    fake.queueRows([]);
+    fake.queueRows([]);
+
+    const create = router.admin.user.createClient.callable({ context: adminContext(fake) });
+
+    await expect(create(validInput)).rejects.toMatchObject({
+      code: "INTERNAL_SERVER_ERROR",
+    });
+    // The sign-up already wrote the user plus credential rows, so the
+    // cleanup must delete that user (cascading to account/session) and the
+    // org. Otherwise a retry hits a duplicate email conflict.
+    const dropUser = fake.queries.find((query) => query.sql.startsWith('delete from "user"'));
+    expect(dropUser?.params).toEqual(["client-new"]);
+    const dropOrg = fake.queries.find((query) =>
+      query.sql.startsWith('delete from "organization"'),
+    );
+    expect(dropOrg).toBeDefined();
+  });
 });
