@@ -316,6 +316,35 @@ describe("ticket.list", () => {
     expect(fake.queries[0]?.params).toContain("org-acme");
   });
 
+  it("accepts the URL query-string form of escalatedOnly", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([ticketRow({ escalated: true })]);
+    fake.queueRows([ticketRow()]);
+
+    const list = router.ticket.list.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Toni Alvarez",
+          role: "technician",
+          organizationId: null,
+        }),
+        db: fake.db,
+      },
+    });
+
+    // GET /tickets?escalatedOnly=true arrives as the string "true".
+    const filtered = await list({ escalatedOnly: "true" as unknown as boolean });
+    expect(filtered.tickets).toHaveLength(1);
+    expect(filtered.tickets[0]?.escalated).toBe(true);
+    expect(fake.queries[0]?.params).toContain(true);
+
+    // "false" must stay false (z.coerce.boolean() would flip it to true).
+    const unfiltered = await list({ escalatedOnly: "false" as unknown as boolean });
+    expect(unfiltered.tickets).toHaveLength(1);
+    expect(fake.queries[1]?.params).not.toContain(true);
+  });
+
   it("orders newest first, which is what the route and the UI both promise", async () => {
     const fake = fakeDatabase();
     fake.queueRows([ticketRow()]);
