@@ -1,5 +1,6 @@
 import { Navigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { authClient } from "@/auth";
 import { Card, CardPanel } from "@/components/ui/card";
 import { homePathForRole, isRole } from "@/lib/session";
@@ -25,11 +26,24 @@ interface GuardProps {
  * Single gate both pages share. `signed-in` renders only with a session,
  * `signed-out` only without one, so the login page never shows to a signed-in
  * user and authed placeholders never flash for signed-out visitors.
+ *
+ * Only blocks on the initial session load. better-auth revalidates on window
+ * focus by default and marks `isPending` again on every signed-out refetch,
+ * so gating on `isPending` alone flashes "Loading session…" on each tab
+ * switch. The settled latch keeps rendering the last known state through
+ * background refetches instead.
  */
 export function SessionGuard({ mode, children }: GuardProps) {
   const session = authClient.useSession();
+  const [hasSettled, setHasSettled] = useState(false);
 
-  if (session.isPending) {
+  useEffect(() => {
+    if (!session.isPending) {
+      setHasSettled(true);
+    }
+  }, [session.isPending]);
+
+  if (!hasSettled && session.isPending) {
     return sessionLoading;
   }
 
