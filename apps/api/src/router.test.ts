@@ -1180,7 +1180,7 @@ describe("admin.user.update", () => {
 
   it("renames a technician", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([["tech-1", "technician"]]);
+    fake.queueRows([["tech-1", "technician", null]]);
     fake.queueRows([]);
     fake.queueRows([userRow({ id: "tech-1", name: "Renamed Tech" })]);
 
@@ -1196,7 +1196,7 @@ describe("admin.user.update", () => {
 
   it("refuses to touch admin accounts", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([["admin-1", "admin"]]);
+    fake.queueRows([["admin-1", "admin", null]]);
 
     const update = router.admin.user.update.callable({ context: adminContext(fake) });
 
@@ -1211,6 +1211,67 @@ describe("admin.user.update", () => {
     const update = router.admin.user.update.callable({ context: adminContext(fake) });
 
     await expect(update({ userId: "tech-1" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("rejects a technician-to-client move without an org", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([["tech-1", "technician", null]]);
+
+    const update = router.admin.user.update.callable({ context: adminContext(fake) });
+
+    await expect(update({ userId: "tech-1", role: "client" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    expect(fake.queries.some((query) => query.sql.startsWith('update "user"'))).toBe(false);
+  });
+
+  it("rejects a client-to-technician move without clearing the org", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([["client-1", "client", "org-acme"]]);
+
+    const update = router.admin.user.update.callable({ context: adminContext(fake) });
+
+    await expect(update({ userId: "client-1", role: "technician" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    expect(fake.queries.some((query) => query.sql.startsWith('update "user"'))).toBe(false);
+  });
+
+  it("moves a technician to client and sets the org in the same write", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([["tech-1", "technician", null]]);
+    fake.queueRows([["org-acme"]]);
+    fake.queueRows([]);
+    fake.queueRows([userRow({ id: "tech-1", role: "client", organizationId: "org-acme" })]);
+
+    const update = router.admin.user.update.callable({ context: adminContext(fake) });
+    const result = await update({
+      userId: "tech-1",
+      role: "client",
+      organizationId: "org-acme",
+    });
+
+    expect(result.user.organizationId).toBe("org-acme");
+    const write = fake.queries.find((query) => query.sql.startsWith('update "user"'));
+    expect(write?.params).toEqual(["client", "org-acme", "tech-1"]);
+  });
+
+  it("moves a client to technician and clears the org in the same write", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([["client-1", "client", "org-acme"]]);
+    fake.queueRows([]);
+    fake.queueRows([userRow({ id: "client-1", role: "technician", organizationId: null })]);
+
+    const update = router.admin.user.update.callable({ context: adminContext(fake) });
+    const result = await update({
+      userId: "client-1",
+      role: "technician",
+      organizationId: null,
+    });
+
+    expect(result.user.organizationId).toBeNull();
+    const write = fake.queries.find((query) => query.sql.startsWith('update "user"'));
+    expect(write?.params).toEqual(["technician", null, "client-1"]);
   });
 });
 

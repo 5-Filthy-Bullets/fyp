@@ -1303,7 +1303,7 @@ export const adminUserRouter = {
           .min(1)
           .nullable()
           .optional()
-          .describe("New org for clients, null for technicians"),
+          .describe("New org for clients, null for technicians; required when changing roles"),
       }),
     )
     .output(z.object({ user: userOutput }))
@@ -1319,7 +1319,7 @@ export const adminUserRouter = {
       }
 
       const [target] = await context.db
-        .select({ id: user.id, role: user.role })
+        .select({ id: user.id, role: user.role, organizationId: user.organizationId })
         .from(user)
         .where(eq(user.id, input.userId))
         .limit(1);
@@ -1339,15 +1339,37 @@ export const adminUserRouter = {
         });
       }
 
+      const isRoleChange = input.role !== undefined && input.role !== target.role;
+      if (isRoleChange && input.organizationId === undefined) {
+        throw new ORPCError("BAD_REQUEST", {
+          message:
+            "When changing roles, pass the organization too: an org id for clients, null for technicians.",
+        });
+      }
+
       const nextOrg = input.organizationId === undefined ? undefined : input.organizationId;
       if (nextRole === "technician" && nextOrg !== undefined && nextOrg !== null) {
         throw new ORPCError("BAD_REQUEST", {
-          message: "Technicians have no organization. Pass null or leave it out.",
+          message: "Technicians have no organization. Pass null to clear it.",
         });
       }
       if (nextRole === "client" && nextOrg === null) {
         throw new ORPCError("BAD_REQUEST", {
           message: "Clients need an organization. Move the account to an org instead.",
+        });
+      }
+      // The write below only touches the org when the caller passes one, so
+      // fall back to the stored org to catch accounts that would stay
+      // stranded: a client with no org, or a technician still holding one.
+      const effectiveOrg = nextOrg === undefined ? target.organizationId : nextOrg;
+      if (nextRole === "client" && effectiveOrg === null) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "Clients need an organization. Pass an org id with the role.",
+        });
+      }
+      if (nextRole === "technician" && effectiveOrg !== null) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "Technicians have no organization. Pass null to clear it.",
         });
       }
       if (nextOrg !== undefined && nextOrg !== null) {
