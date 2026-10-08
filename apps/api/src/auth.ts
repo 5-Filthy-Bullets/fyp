@@ -1,8 +1,9 @@
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
-import { betterAuth } from "better-auth";
+import { eq } from "drizzle-orm";
+import { APIError, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { authSchema } from "./db/schema";
+import { authSchema, organization, user } from "./db/schema";
 
 export interface AuthEnv {
   readonly DATABASE_URL: string;
@@ -23,8 +24,8 @@ export const createAuth = (env: AuthEnv) => {
    * stick, so it keeps the Lax default.
    */
   const cookieAttributes = env.BETTER_AUTH_URL.startsWith("https://")
-    ? { sameSite: "none", secure: true, partitioned: true } as const
-    : { sameSite: "lax", secure: false } as const;
+    ? ({ sameSite: "none", secure: true, partitioned: true } as const)
+    : ({ sameSite: "lax", secure: false } as const);
 
   return betterAuth({
     database: drizzleAdapter(db, {
@@ -69,6 +70,53 @@ export const createAuth = (env: AuthEnv) => {
     },
     emailAndPassword: {
       enabled: true,
+    },
+    /**
+     * Deactivation lives in two checks. The admin plugin writes `banned` and
+     * drops sessions on ban; this hook re-reads the user row on every
+     * sign-in so a banned account, or one whose org was suspended, never
+     * gets a fresh session. `readCaller` in access.ts repeats the check per
+     * RPC call for sessions that were already live at ban time.
+     */
+    databaseHooks: {
+      session: {
+        create: {
+          before: async (session, context) => {
+            if (!context) {
+              return;
+            }
+            const userId = session.userId;
+            const [row] = await db
+              .select({
+                banned: user.banned,
+                organizationId: user.organizationId,
+              })
+              .from(user)
+              .where(eq(user.id, userId))
+              .limit(1);
+            if (!row || row.banned) {
+              throw new APIError("FORBIDDEN", {
+                code: "BANNED_USER",
+                message: "This account has been deactivated. Ask the vendor team to reactivate it.",
+              });
+            }
+            if (row.organizationId !== null) {
+              const [org] = await db
+                .select({ isActive: organization.isActive })
+                .from(organization)
+                .where(eq(organization.id, row.organizationId))
+                .limit(1);
+              if (!org || !org.isActive) {
+                throw new APIError("FORBIDDEN", {
+                  code: "BANNED_USER",
+                  message:
+                    "This organization has been suspended. Ask the vendor team to reactivate it.",
+                });
+              }
+            }
+          },
+        },
+      },
     },
   });
 };

@@ -15,8 +15,26 @@ export interface SessionUser {
  * `SessionReader` so a drift in better-auth's session shape fails typecheck
  * instead of passing tests and failing at runtime.
  */
+/**
+ * Queued sign-up ids. The fake returns a fixed id per call; the duplicate
+ * lookup the router runs next resolves it through `queuedSignUpIds` so the
+ * delete targets the same row signup created.
+ */
+const signUpQueue: { readonly id: string }[] = [];
+
+export const queueSignUpUser = (id: string): void => {
+  signUpQueue.push({ id });
+};
+
 export const authWithSession = (user: SessionUser): SessionReader => ({
   api: {
+    signUpEmail: async () => {
+      const next = signUpQueue.shift();
+      if (!next) {
+        throw new Error("No queued sign-up user. Call queueSignUpUser(id) first.");
+      }
+      return { user: { id: next.id } };
+    },
     getSession: async () => ({
       session: {
         id: "test-session-id",
@@ -42,6 +60,9 @@ export const authWithSession = (user: SessionUser): SessionReader => ({
 
 export const authWithoutSession = (): SessionReader => ({
   api: {
+    signUpEmail: async () => {
+      throw new Error("signUpEmail should not run without a session.");
+    },
     getSession: async () => null,
   },
 });
@@ -60,6 +81,14 @@ export interface FakeDatabase {
    * selected. Queued in call order and consumed one entry per statement.
    */
   readonly queueRows: (rows: readonly (readonly unknown[])[]) => void;
+  /**
+   * Fail the next caller-active user check as banned. The per-call
+   * `assertCallerActive` check is answered transparently (and not recorded)
+   * so business tests stay focused; use this only for ban/suspend cases.
+   */
+  readonly queueBannedCaller: () => void;
+  /** Fail the next organization-active check as suspended. */
+  readonly queueSuspendedOrg: () => void;
 }
 
 /**
@@ -67,15 +96,37 @@ export interface FakeDatabase {
  * the real schema, so a test can assert on the WHERE clause and the bound
  * parameters the router actually sends. That is where org scoping lives, so it
  * is the part worth pinning down without a live database.
+ *
+ * The per-call caller-active check (`assertCallerActive`) runs before every
+ * business query. The fake answers it as active by default without recording
+ * or consuming queued business rows, so existing tests keep asserting on
+ * business SQL only. Ban/suspend paths opt in via queueBannedCaller /
+ * queueSuspendedOrg.
  */
 export const fakeDatabase = (): FakeDatabase => {
   const queries: RecordedQuery[] = [];
   const pending: (readonly (readonly unknown[])[])[] = [];
+  let bannedOverrides = 0;
+  let suspendedOverrides = 0;
 
   const send = async (
     sql: string,
     params: readonly unknown[],
   ): Promise<{ rows: readonly (readonly unknown[])[] }> => {
+    if (sql.startsWith('select "banned" from "user"')) {
+      if (bannedOverrides > 0) {
+        bannedOverrides -= 1;
+        return { rows: [[true]] };
+      }
+      return { rows: [[false]] };
+    }
+    if (sql.startsWith('select "is_active" from "organization"')) {
+      if (suspendedOverrides > 0) {
+        suspendedOverrides -= 1;
+        return { rows: [[false]] };
+      }
+      return { rows: [[true]] };
+    }
     queries.push({ sql, params });
     const rows = pending.shift() ?? [];
     return { rows };
@@ -91,6 +142,12 @@ export const fakeDatabase = (): FakeDatabase => {
     queueRows: (rows) => {
       pending.push(rows);
     },
+    queueBannedCaller: () => {
+      bannedOverrides += 1;
+    },
+    queueSuspendedOrg: () => {
+      suspendedOverrides += 1;
+    },
   };
 };
 
@@ -103,6 +160,9 @@ export const ticketColumns = [
   "description",
   "reporterName",
   "status",
+  "priority",
+  "escalated",
+  "escalatedReason",
   "organizationId",
   "organizationName",
   "productId",
@@ -121,6 +181,9 @@ export const ticketRow = (
     description: "The line halts after roughly twenty minutes of runtime.",
     reporterName: "Dana Okafor",
     status: "open",
+    priority: "low",
+    escalated: false,
+    escalatedReason: null,
     organizationId: "org-acme",
     organizationName: "Acme Manufacturing",
     productId: "prod-line-9",
@@ -131,6 +194,55 @@ export const ticketRow = (
   };
 
   return ticketColumns.map((column) => values[column]);
+};
+
+/** Fake user row in the order the admin user select reads the columns. */
+export const userColumns = [
+  "id",
+  "name",
+  "email",
+  "role",
+  "organizationId",
+  "organizationName",
+  "banned",
+  "createdAt",
+] as const;
+
+export const userRow = (
+  overrides: Partial<Record<(typeof userColumns)[number], unknown>> = {},
+): readonly unknown[] => {
+  const values: Record<(typeof userColumns)[number], unknown> = {
+    id: "user-1",
+    name: "Toni Alvarez",
+    email: "tech@reliable.test",
+    role: "technician",
+    organizationId: null,
+    organizationName: null,
+    banned: false,
+    createdAt: new Date("2026-03-04T09:15:00Z"),
+    ...overrides,
+  };
+
+  return userColumns.map((column) => values[column]);
+};
+
+/** Column order of the message select, for positional fake rows. */
+export const messageColumns = ["id", "authorId", "content", "visibility", "createdAt"] as const;
+
+/** Builds a fake message row in the order the router selects the columns. */
+export const messageRow = (
+  overrides: Partial<Record<(typeof messageColumns)[number], unknown>> = {},
+): readonly unknown[] => {
+  const values: Record<(typeof messageColumns)[number], unknown> = {
+    id: "message-1",
+    authorId: "test-user-id",
+    content: "Looking into the controller logs now.",
+    visibility: "public",
+    createdAt: new Date("2026-03-04T10:00:00Z"),
+    ...overrides,
+  };
+
+  return messageColumns.map((column) => values[column]);
 };
 
 export type { RouterSession };

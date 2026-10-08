@@ -19,10 +19,26 @@ describe("openapi spec", () => {
     const spec = await generate();
 
     expect(Object.keys(spec.paths ?? {}).sort()).toEqual([
+      "/admin/clients",
+      "/admin/organizations",
+      "/admin/organizations/{organizationId}",
+      "/admin/organizations/{organizationId}/active",
+      "/admin/organizations/{organizationId}/products",
+      "/admin/products",
+      "/admin/technicians",
+      "/admin/users",
+      "/admin/users/{userId}",
+      "/admin/users/{userId}/active",
       "/hello",
       "/me",
       "/products",
       "/tickets",
+      "/tickets/mine",
+      "/tickets/technicians",
+      "/tickets/{ticketId}",
+      "/tickets/{ticketId}/assignee",
+      "/tickets/{ticketId}/escalation",
+      "/tickets/{ticketId}/messages",
       "/tickets/{ticketId}/status",
     ]);
   });
