@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { CircleDashed, Hand, Inbox, LoaderCircle, Wrench } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { RecentTickets, StatCard, StatusBadge } from "@/components/dashboard-cards";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardPanel, CardTitle } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
@@ -147,6 +148,7 @@ export function TechnicianDashboard() {
                     </p>
                   </div>
                   <StatusBadge status={ticket.status} />
+                  {ticket.escalated && <Badge variant="error">Escalated</Badge>}
                 </li>
               ))}
             </ul>
@@ -191,6 +193,7 @@ function ClaimRow({ ticket }: { readonly ticket: Ticket }) {
         </p>
       </div>
       <StatusBadge status={ticket.status} />
+      {ticket.escalated && <Badge variant="error">Escalated</Badge>}
       <Button
         size="sm"
         variant="outline"

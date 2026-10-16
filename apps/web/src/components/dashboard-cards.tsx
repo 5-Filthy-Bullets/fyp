@@ -161,6 +161,7 @@ export function RecentTickets({
                 </div>
                 <div className="flex items-center gap-2">
                   <StatusBadge status={ticket.status} />
+                  {ticket.escalated && <Badge variant="error">Escalated</Badge>}
                   <span className="text-xs text-muted-foreground tabular-nums">
                     {formatTicketDate(ticket.createdAt)}
                   </span>
