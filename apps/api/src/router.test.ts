@@ -572,6 +572,7 @@ describe("ticket.assign", () => {
   it("hands the ticket to a chosen technician", async () => {
     const fake = fakeDatabase();
     fake.queueRows([["tech-2", "technician", false]]);
+    fake.queueRows([["tech-1"]]);
     fake.queueRows([
       [
         "ticket-1",
@@ -608,6 +609,7 @@ describe("ticket.assign", () => {
   it("clears the escalation when an escalated ticket is assigned", async () => {
     const fake = fakeDatabase();
     fake.queueRows([["tech-2", "technician", false]]);
+    fake.queueRows([[null]]);
     fake.queueRows([
       [
         "ticket-1",
@@ -635,6 +637,35 @@ describe("ticket.assign", () => {
     const write = fake.queries.find((query) => query.sql.startsWith('update "ticket"'));
     expect(write?.params).toContain(false);
     expect(write?.params).toContain(null);
+  });
+
+  it("rejects assigning to the technician who already owns it", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([["tech-2", "technician", false]]);
+    fake.queueRows([["tech-2"]]);
+
+    const assign = router.ticket.assign.callable({ context: staffContext(fake) });
+
+    await expect(assign({ ticketId: "ticket-1", assigneeId: "tech-2" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "That technician already owns this ticket.",
+    });
+    expect(fake.queries.some((query) => query.sql.startsWith('update "ticket"'))).toBe(false);
+  });
+
+  it("reports a missing ticket as not found", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([["tech-2", "technician", false]]);
+    fake.queueRows([]);
+
+    const assign = router.ticket.assign.callable({ context: staffContext(fake) });
+
+    await expect(
+      assign({ ticketId: "ticket-missing", assigneeId: "tech-2" }),
+    ).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    expect(fake.queries.some((query) => query.sql.startsWith('update "ticket"'))).toBe(false);
   });
 
   it("rejects an assignee who is not a technician", async () => {

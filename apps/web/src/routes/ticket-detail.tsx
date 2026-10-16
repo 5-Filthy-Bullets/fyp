@@ -334,6 +334,9 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
   const ticket = detail.data?.ticket;
   const techsQuery = useTechnicians();
   const techs = techsQuery.data?.technicians ?? [];
+  // The current owner cannot be reassigned to themselves, so the picker
+  // only offers everyone else. The full list still resolves the owner name.
+  const assignableTechs = techs.filter((tech) => tech.id !== ticket?.assignedTo);
 
   const isStaff = role === "technician" || role === "admin";
   const [assigneeId, setAssigneeId] = useState("");
@@ -402,6 +405,16 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
       toastManager.add({ title: "Could not assign ticket", description: message, type: "error" });
       return;
     }
+    if (
+      ticket?.assignedTo !== null &&
+      ticket?.assignedTo !== undefined &&
+      trimmed === ticket.assignedTo
+    ) {
+      const message = "That technician already owns this ticket.";
+      setActionError(message);
+      toastManager.add({ title: "Could not assign ticket", description: message, type: "error" });
+      return;
+    }
     const picked = techs.find((tech) => tech.id === trimmed);
     setActionError(null);
     assign.mutate(
@@ -419,7 +432,11 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
         onError: (error) => {
           const message = error instanceof Error ? error.message : "Could not assign the ticket.";
           setActionError(message);
-          toastManager.add({ title: "Could not assign ticket", description: message, type: "error" });
+          toastManager.add({
+            title: "Could not assign ticket",
+            description: message,
+            type: "error",
+          });
         },
       },
     );
@@ -496,16 +513,22 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
             <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
               <Spinner className="size-4" aria-hidden /> Loading technicians…
             </p>
+          ) : assignableTechs.length === 0 ? (
+            <p className="text-sm text-muted-foreground" role="status">
+              No other technicians available. The current owner is the only technician.
+            </p>
           ) : (
             <div className="flex gap-2">
               <div className="min-w-0 flex-1">
                 <Autocomplete
                   key={pickerKey}
-                  items={techs}
+                  items={assignableTechs}
                   filter={matchesTechnician}
                   itemToStringValue={(tech) => tech.name}
                   openOnInputClick
-                  onValueChange={(text) => setAssigneeId(resolveTechnicianId(techs, text))}
+                  onValueChange={(text) =>
+                    setAssigneeId(resolveTechnicianId(assignableTechs, text))
+                  }
                 >
                   <AutocompleteInput
                     id="assignee"
