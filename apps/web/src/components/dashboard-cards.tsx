@@ -3,6 +3,7 @@ import type { LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardPanel, CardTitle } from "@/components/ui/card";
+import { TicketTitleLink } from "@/components/ticket-link";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { formatTicketDate, priorityLabel, statusLabel } from "@/lib/tickets";
@@ -150,17 +151,12 @@ export function RecentTickets({
             {tickets.map((ticket) => (
               <li key={ticket.id} className={cn(recentRowGrid, "px-6 py-3.5")}>
                 <div className="min-w-0">
-                  <Link
-                    to="/tickets/$ticketId"
-                    params={{ ticketId: ticket.id }}
-                    className="block truncate text-sm font-medium text-primary hover:underline"
-                  >
-                    {ticket.title}
-                  </Link>
+                  <TicketTitleLink ticketId={ticket.id} title={ticket.title} />
                   <p className="truncate text-xs text-muted-foreground">{meta(ticket)}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <StatusBadge status={ticket.status} />
+                  {ticket.escalated && <Badge variant="error">Escalated</Badge>}
                   <span className="text-xs text-muted-foreground tabular-nums">
                     {formatTicketDate(ticket.createdAt)}
                   </span>

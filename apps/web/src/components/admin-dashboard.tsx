@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { CircleDashed, Inbox, LoaderCircle, CircleCheck, TriangleAlert } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { RecentTickets, StatCard } from "@/components/dashboard-cards";
+import { TicketTitleLink } from "@/components/ticket-link";
 import { Card, CardDescription, CardHeader, CardPanel, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -105,13 +106,7 @@ export function AdminDashboard() {
               <ul className="divide-y">
                 {escalated.slice(0, 8).map((ticket) => (
                   <li key={ticket.id} className="px-6 py-3.5">
-                    <Link
-                      to="/tickets/$ticketId"
-                      params={{ ticketId: ticket.id }}
-                      className="block truncate text-sm font-medium text-primary hover:underline"
-                    >
-                      {ticket.title}
-                    </Link>
+                    <TicketTitleLink ticketId={ticket.id} title={ticket.title} />
                     <p className="truncate text-xs text-muted-foreground">
                       {ticket.organizationName} · {ticket.escalatedReason ?? "No reason given"}
                     </p>

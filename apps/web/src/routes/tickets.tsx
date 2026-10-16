@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { SessionGuard } from "@/components/auth-guard";
 import { PriorityBadge, StatusBadge } from "@/components/dashboard-cards";
+import { TicketTitleLink } from "@/components/ticket-link";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,6 +43,7 @@ import {
 } from "@/lib/tickets";
 import type { Ticket, TicketListSearch, TicketStatus } from "@/lib/tickets";
 import { useMyTickets, useTicketQueue } from "@/lib/tickets";
+import { useBackgroundTicketPrefetch } from "@/lib/tickets";
 import { ALL_PRIORITIES, useTicketListStore } from "@/stores/ticket-list-store";
 import type { TicketPriorityFilter } from "@/stores/ticket-list-store";
 
@@ -234,13 +236,7 @@ function TicketsList() {
           const ticket = info.row.original;
           return (
             <div className="min-w-52">
-              <Link
-                to="/tickets/$ticketId"
-                params={{ ticketId: ticket.id }}
-                className="block truncate text-sm font-medium text-primary hover:underline"
-              >
-                {ticket.title}
-              </Link>
+              <TicketTitleLink ticketId={ticket.id} title={ticket.title} />
               <p className="mt-0.5 truncate text-xs text-muted-foreground">
                 {isStaff
                   ? `${ticket.organizationName} · ${ticket.productName} · ${ticket.reporterName}`
@@ -290,6 +286,10 @@ function TicketsList() {
       setSorting(typeof updater === "function" ? updater(sorting) : updater),
     state: { pagination, sorting },
   });
+
+  // Warm the visible page in the background: opening a row renders from
+  // cache even without a hover first. Bounded inside the hook.
+  useBackgroundTicketPrefetch(table.getRowModel().rows.map((row) => row.original));
 
   // A filter change can strand the page past the last page, so jump back.
   // Pagination stays put across background refetches and re-sorts.

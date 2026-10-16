@@ -1,11 +1,13 @@
 import { CircleDashed, Hand, Inbox, LoaderCircle, Wrench } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { RecentTickets, StatCard, StatusBadge } from "@/components/dashboard-cards";
+import { TicketTitleLink } from "@/components/ticket-link";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardPanel, CardTitle } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import { useCaller } from "@/lib/session";
-import { summarizeTickets, useSetTicketStatus, useTicketQueue } from "@/lib/tickets";
+import { summarizeTickets, useBackgroundTicketPrefetch, useSetTicketStatus, useTicketQueue } from "@/lib/tickets";
 import type { Ticket } from "@/lib/tickets";
 
 const MY_WORK_LIMIT = 5;
@@ -26,6 +28,10 @@ export function TechnicianDashboard() {
     userId === undefined
       ? []
       : tickets.filter((ticket) => ticket.assignedTo === userId).slice(0, MY_WORK_LIMIT);
+
+  // Warm the visible rows in the background: the queue opens instantly even
+  // without a hover first. Bounded inside the hook, fires once per ticket.
+  useBackgroundTicketPrefetch([...unclaimed, ...mine]);
 
   return (
     <div className="grid gap-6">
@@ -134,12 +140,13 @@ export function TechnicianDashboard() {
                   className="flex flex-wrap items-center gap-2 px-6 py-3.5 sm:flex-nowrap"
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{ticket.title}</p>
+                    <TicketTitleLink ticketId={ticket.id} title={ticket.title} />
                     <p className="truncate text-xs text-muted-foreground">
                       {ticket.organizationName} · {ticket.productName}
                     </p>
                   </div>
                   <StatusBadge status={ticket.status} />
+                  {ticket.escalated && <Badge variant="error">Escalated</Badge>}
                 </li>
               ))}
             </ul>
@@ -172,12 +179,13 @@ function ClaimRow({ ticket }: { readonly ticket: Ticket }) {
   return (
     <li className="flex flex-wrap items-center gap-2 px-6 py-3.5 sm:flex-nowrap">
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{ticket.title}</p>
+        <TicketTitleLink ticketId={ticket.id} title={ticket.title} />
         <p className="truncate text-xs text-muted-foreground">
           {ticket.organizationName} · {ticket.productName} · {ticket.reporterName}
         </p>
       </div>
       <StatusBadge status={ticket.status} />
+      {ticket.escalated && <Badge variant="error">Escalated</Badge>}
       <Button
         size="sm"
         variant="outline"

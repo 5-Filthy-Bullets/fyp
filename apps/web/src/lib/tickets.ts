@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type { RouterClient } from "@orpc/server";
+import { useCallback, useEffect } from "react";
 import type { AppRouter } from "../../../api/src/router";
 import { orpcQuery } from "@/query";
 
@@ -347,6 +348,73 @@ export const useTicketDetail = (ticketId: string) =>
       refetchInterval: TICKET_POLL_MS,
     }),
   );
+
+/**
+ * Intent prefetch for one ticket: warms the detail + thread queries the
+ * detail page reads, so a click renders from cache instead of waiting on
+ * two round trips. Entries that are already fresh are skipped, so calling
+ * this on every hover is cheap.
+ */
+export const usePrefetchTicket = (ticketId: string): (() => void) => {
+  const queryClient = useQueryClient();
+
+  return useCallback(() => {
+    void queryClient.prefetchQuery(orpcQuery.ticket.get.queryOptions({ input: { ticketId } }));
+    void queryClient.prefetchQuery(
+      orpcQuery.ticket.listMessages.queryOptions({ input: { ticketId } }),
+    );
+  }, [queryClient, ticketId]);
+};
+
+const BACKGROUND_PREFETCH_DELAY_MS = 1200;
+const BACKGROUND_PREFETCH_LIMIT = 5;
+const BACKGROUND_PREFETCH_ID_CAP = 500;
+
+/** Session guard: background preload fires once per ticket, never repeats. */
+const backgroundPrefetchedIds = new Set<string>();
+
+/**
+ * Idle background preload for the rows already on screen. Fires once per
+ * ticket after a short delay, so the visible queue opens instantly even
+ * without a hover first. Bounded to a few tickets and skipped in a hidden
+ * tab, so a big queue never turns one page view into a request storm.
+ */
+export const useBackgroundTicketPrefetch = (tickets: readonly Ticket[]): void => {
+  const queryClient = useQueryClient();
+  const idsKey = tickets.map((ticket) => ticket.id).join(",");
+
+  useEffect(() => {
+    if (tickets.length === 0) {
+      return;
+    }
+    const targets = tickets
+      .filter((ticket) => !backgroundPrefetchedIds.has(ticket.id))
+      .slice(0, BACKGROUND_PREFETCH_LIMIT);
+    if (targets.length === 0) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      if (document.hidden) {
+        return;
+      }
+      if (backgroundPrefetchedIds.size > BACKGROUND_PREFETCH_ID_CAP) {
+        backgroundPrefetchedIds.clear();
+      }
+      for (const target of targets) {
+        backgroundPrefetchedIds.add(target.id);
+        void queryClient.prefetchQuery(
+          orpcQuery.ticket.get.queryOptions({ input: { ticketId: target.id } }),
+        );
+        void queryClient.prefetchQuery(
+          orpcQuery.ticket.listMessages.queryOptions({ input: { ticketId: target.id } }),
+        );
+      }
+    }, BACKGROUND_PREFETCH_DELAY_MS);
+    return () => window.clearTimeout(timer);
+    // The key carries the dep: re-running on every poll render would defeat the delay.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryClient, idsKey]);
+};
 
 /** Message thread alone, polled faster so a fresh reply appears promptly. */
 export const useTicketMessages = (ticketId: string) =>
