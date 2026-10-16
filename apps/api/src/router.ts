@@ -674,7 +674,7 @@ export const ticketRouter = {
       path: "/tickets/{ticketId}/assignee",
       summary: "Assign a ticket to a technician",
       description:
-        "Explicitly hands a ticket to a chosen technician. The assignee must be a vendor staff account with the technician role, so a client or admin account cannot end up owning queue work. Assigning claims the ticket: it moves to in progress and clears any escalation, since the admin has handled the review by routing it.",
+        "Explicitly hands a ticket to a chosen technician. The assignee must be a vendor staff account with the technician role, so a client or admin account cannot end up owning queue work. Assigning claims the ticket: it moves to in progress and clears any escalation, since the admin has handled the review by routing it. Reassigning to the current owner is rejected.",
       tags: ["Tickets"],
     })
     .input(
@@ -694,6 +694,24 @@ export const ticketRouter = {
       if (!assignee || assignee.role !== "technician" || assignee.banned) {
         throw new ORPCError("BAD_REQUEST", {
           message: "That account is not an active technician.",
+        });
+      }
+
+      const [current] = await context.db
+        .select({ assignedTo: ticket.assignedTo })
+        .from(ticket)
+        .where(eq(ticket.id, input.ticketId))
+        .limit(1);
+
+      if (!current) {
+        throw new ORPCError("NOT_FOUND", {
+          message: "That ticket does not exist.",
+        });
+      }
+
+      if (current.assignedTo === input.assigneeId) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "That technician already owns this ticket.",
         });
       }
 
