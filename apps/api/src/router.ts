@@ -674,7 +674,7 @@ export const ticketRouter = {
       path: "/tickets/{ticketId}/assignee",
       summary: "Assign a ticket to a technician",
       description:
-        "Explicitly hands a ticket to a chosen technician. The assignee must be a vendor staff account with the technician role, so a client or admin account cannot end up owning queue work.",
+        "Explicitly hands a ticket to a chosen technician. The assignee must be a vendor staff account with the technician role, so a client or admin account cannot end up owning queue work. Assigning claims the ticket: it moves to in progress and clears any escalation, since the admin has handled the review by routing it.",
       tags: ["Tickets"],
     })
     .input(
@@ -699,7 +699,14 @@ export const ticketRouter = {
 
       const [updated] = await context.db
         .update(ticket)
-        .set({ assignedTo: input.assigneeId })
+        .set({
+          assignedTo: input.assigneeId,
+          // Claimed work is in progress, and routing an escalated ticket
+          // resolves the admin review, so the flag and reason go away.
+          status: "in_progress",
+          escalated: false,
+          escalatedReason: null,
+        })
         .where(eq(ticket.id, input.ticketId))
         .returning();
 

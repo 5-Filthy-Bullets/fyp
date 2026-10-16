@@ -21,6 +21,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import { toastManager } from "@/components/ui/toast";
 import { useCaller } from "@/lib/session";
 import {
   formatTicketDate,
@@ -396,9 +397,12 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
     event.preventDefault();
     const trimmed = assigneeId.trim();
     if (trimmed === "") {
-      setActionError("Pick a technician first.");
+      const message = "Pick a technician first.";
+      setActionError(message);
+      toastManager.add({ title: "Could not assign ticket", description: message, type: "error" });
       return;
     }
+    const picked = techs.find((tech) => tech.id === trimmed);
     setActionError(null);
     assign.mutate(
       { ticketId, assigneeId: trimmed },
@@ -406,9 +410,16 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
         onSuccess: () => {
           setAssigneeId("");
           setPickerKey((key) => key + 1);
+          toastManager.add({
+            title: "Ticket assigned",
+            description: `Assigned to ${picked?.name ?? "technician"}. Escalation cleared, now in progress.`,
+            type: "success",
+          });
         },
         onError: (error) => {
-          setActionError(error instanceof Error ? error.message : "Could not assign the ticket.");
+          const message = error instanceof Error ? error.message : "Could not assign the ticket.";
+          setActionError(message);
+          toastManager.add({ title: "Could not assign ticket", description: message, type: "error" });
         },
       },
     );
@@ -519,7 +530,7 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
                   </AutocompletePopup>
                 </Autocomplete>
               </div>
-              <Button type="submit" variant="outline">
+              <Button type="submit" variant="outline" loading={assign.isPending}>
                 Assign
               </Button>
             </div>
