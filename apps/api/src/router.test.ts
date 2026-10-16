@@ -566,7 +566,8 @@ describe("ticket.assign", () => {
     db: fake.db,
   });
 
-  const assignedRow = (assignedTo: string) => ticketRow({ status: "open", assignedTo });
+  const assignedRow = (assignedTo: string) =>
+    ticketRow({ status: "in_progress", assignedTo, escalated: false, escalatedReason: null });
 
   it("hands the ticket to a chosen technician", async () => {
     const fake = fakeDatabase();
@@ -579,7 +580,7 @@ describe("ticket.assign", () => {
         "Conveyor belt stops mid-cycle",
         "The line halts after roughly twenty minutes of runtime.",
         "Dana Okafor",
-        "open",
+        "in_progress",
         "low",
         false,
         null,
@@ -593,10 +594,47 @@ describe("ticket.assign", () => {
     const { ticket } = await assign({ ticketId: "ticket-1", assigneeId: "tech-2" });
 
     expect(ticket.assignedTo).toBe("tech-2");
+    // Assigning claims the ticket, so the readback moves to in progress.
+    expect(ticket.status).toBe("in_progress");
     // The owner in the response is read back from a queued row, so pin the
-    // write itself: the update must carry the assignee to the right ticket.
+    // write itself: the update must carry the assignee to the right ticket,
+    // move to in progress, and clear any escalation.
     const write = fake.queries.find((query) => query.sql.startsWith('update "ticket"'));
-    expect(write?.params).toEqual(["tech-2", "ticket-1"]);
+    expect(write?.params).toEqual(["in_progress", false, null, "tech-2", "ticket-1"]);
+    expect(write?.sql).toContain('"status"');
+    expect(write?.sql).toContain('"escalated"');
+  });
+
+  it("clears the escalation when an escalated ticket is assigned", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([["tech-2", "technician", false]]);
+    fake.queueRows([
+      [
+        "ticket-1",
+        "org-acme",
+        "prod-line-9",
+        "Conveyor belt stops mid-cycle",
+        "The line halts after roughly twenty minutes of runtime.",
+        "Dana Okafor",
+        "in_progress",
+        "low",
+        false,
+        null,
+        "tech-2",
+        new Date("2026-03-04T09:15:00Z"),
+      ],
+    ]);
+    fake.queueRows([assignedRow("tech-2")]);
+
+    const assign = router.ticket.assign.callable({ context: staffContext(fake) });
+    const { ticket } = await assign({ ticketId: "ticket-1", assigneeId: "tech-2" });
+
+    // The admin routing the ticket resolves the review: no longer escalated.
+    expect(ticket.escalated).toBe(false);
+    expect(ticket.escalatedReason).toBeNull();
+    const write = fake.queries.find((query) => query.sql.startsWith('update "ticket"'));
+    expect(write?.params).toContain(false);
+    expect(write?.params).toContain(null);
   });
 
   it("rejects an assignee who is not a technician", async () => {

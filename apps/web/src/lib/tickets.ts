@@ -282,7 +282,14 @@ export const useAssignTicket = (ticketId: string) => {
         await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.get.key() });
         const previous = snapshotTicketCaches(queryClient);
         const epoch = nextTicketEpoch(input.ticketId);
-        patchTicketCaches(queryClient, input.ticketId, { assignedTo: input.assigneeId });
+        // Mirrors the server write: claiming moves to in progress and
+        // clears the escalation, so the queued rows never flash stale.
+        patchTicketCaches(queryClient, input.ticketId, {
+          assignedTo: input.assigneeId,
+          status: "in_progress",
+          escalated: false,
+          escalatedReason: null,
+        });
         return { previous, epoch };
       },
       onError: (_error, input, context) => {
