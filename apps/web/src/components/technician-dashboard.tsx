@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { CircleDashed, Hand, Inbox, LoaderCircle, Wrench } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { RecentTickets, StatCard, StatusBadge } from "@/components/dashboard-cards";
@@ -134,7 +135,13 @@ export function TechnicianDashboard() {
                   className="flex flex-wrap items-center gap-2 px-6 py-3.5 sm:flex-nowrap"
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{ticket.title}</p>
+                    <Link
+                      to="/tickets/$ticketId"
+                      params={{ ticketId: ticket.id }}
+                      className="block truncate text-sm font-medium text-primary hover:underline"
+                    >
+                      {ticket.title}
+                    </Link>
                     <p className="truncate text-xs text-muted-foreground">
                       {ticket.organizationName} · {ticket.productName}
                     </p>
@@ -172,7 +179,13 @@ function ClaimRow({ ticket }: { readonly ticket: Ticket }) {
   return (
     <li className="flex flex-wrap items-center gap-2 px-6 py-3.5 sm:flex-nowrap">
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{ticket.title}</p>
+        <Link
+          to="/tickets/$ticketId"
+          params={{ ticketId: ticket.id }}
+          className="block truncate text-sm font-medium text-primary hover:underline"
+        >
+          {ticket.title}
+        </Link>
         <p className="truncate text-xs text-muted-foreground">
           {ticket.organizationName} · {ticket.productName} · {ticket.reporterName}
         </p>
