@@ -108,8 +108,9 @@ app.all("/api/uploadthing/*", async (c) => {
   if (request.method !== "GET" && request.method !== "POST") {
     return c.text("Method not allowed", 405);
   }
-  const response = await handlers[request.method](request);
-  return response;
+  // v7's createRouteHandler resolves to one function taking the raw
+  // request, not a per-method map, so it runs directly.
+  return handlers(request);
 });
 
 app.get("/", (c) => c.text("API is running"));
