@@ -137,7 +137,7 @@ export function TechnicianDashboard() {
               {mine.map((ticket) => (
                 <li
                   key={ticket.id}
-                  className="flex flex-wrap items-center gap-2 px-6 py-3.5 sm:flex-nowrap"
+                  className="flex min-w-0 flex-col gap-2 px-4 py-3.5 sm:flex-row sm:flex-wrap sm:items-center sm:px-6"
                 >
                   <div className="min-w-0 flex-1">
                     <TicketTitleLink ticketId={ticket.id} title={ticket.title} />
@@ -145,8 +145,10 @@ export function TechnicianDashboard() {
                       {ticket.organizationName} · {ticket.productName}
                     </p>
                   </div>
-                  <StatusBadge status={ticket.status} />
-                  {ticket.escalated && <Badge variant="error">Escalated</Badge>}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge status={ticket.status} />
+                    {ticket.escalated && <Badge variant="error">Escalated</Badge>}
+                  </div>
                 </li>
               ))}
             </ul>
@@ -177,23 +179,26 @@ function ClaimRow({ ticket }: { readonly ticket: Ticket }) {
   };
 
   return (
-    <li className="flex flex-wrap items-center gap-2 px-6 py-3.5 sm:flex-nowrap">
+    <li className="flex min-w-0 flex-col gap-2 px-4 py-3.5 sm:flex-row sm:flex-wrap sm:items-center sm:px-6">
       <div className="min-w-0 flex-1">
         <TicketTitleLink ticketId={ticket.id} title={ticket.title} />
         <p className="truncate text-xs text-muted-foreground">
           {ticket.organizationName} · {ticket.productName} · {ticket.reporterName}
         </p>
       </div>
-      <StatusBadge status={ticket.status} />
-      {ticket.escalated && <Badge variant="error">Escalated</Badge>}
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={claim}
-        aria-label={`Claim ticket ${ticket.title}`}
-      >
-        Claim
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusBadge status={ticket.status} />
+        {ticket.escalated && <Badge variant="error">Escalated</Badge>}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={claim}
+          aria-label={`Claim ticket ${ticket.title}`}
+          className="min-h-11 w-full lg:min-h-0 lg:w-auto"
+        >
+          Claim
+        </Button>
+      </div>
       {setStatus.isError && (
         <p className="w-full text-xs text-destructive" role="alert">
           Could not claim this ticket. Try again.

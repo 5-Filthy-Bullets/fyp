@@ -195,9 +195,9 @@ function MessageThread({ ticketId }: { readonly ticketId: string }) {
 
 function MessageRow({ message }: { readonly message: TicketMessage }) {
   return (
-    <li className="grid gap-2 px-6 py-3.5">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-muted-foreground tabular-nums">
+    <li className="grid min-w-0 gap-2 px-4 py-3.5 sm:px-6">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span className="text-xs break-words text-muted-foreground tabular-nums">
           {formatTicketDate(message.createdAt)}
         </span>
         {message.visibility === "internal" && (
@@ -213,7 +213,9 @@ function MessageRow({ message }: { readonly message: TicketMessage }) {
             src={message.attachmentUrl}
             alt={message.attachmentName ?? "Attached photo"}
             loading="lazy"
-            className="max-h-80 w-auto rounded-lg border object-contain"
+            decoding="async"
+            sizes="(min-width: 64rem) 28rem, (min-width: 40rem) 75vw, 90vw"
+            className="h-auto max-h-80 w-full rounded-lg border object-contain sm:w-auto"
           />
         </a>
       )}
@@ -222,7 +224,8 @@ function MessageRow({ message }: { readonly message: TicketMessage }) {
           src={message.attachmentUrl}
           controls
           preload="metadata"
-          className="max-h-80 w-full max-w-md rounded-lg border"
+          playsInline
+          className="h-auto max-h-80 w-full max-w-md rounded-lg border"
         />
       )}
       {message.attachmentUrl !== null && (
@@ -354,7 +357,7 @@ function Composer({ ticketId, isStaff }: { readonly ticketId: string; readonly i
               onChange={(event) => setContent(event.target.value)}
               rows={4}
               placeholder="Write an update…"
-              className="min-h-24 w-full rounded-lg border border-input bg-background px-3 py-2 text-base shadow-xs/5 outline-none transition-shadow placeholder:text-muted-foreground/72 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 sm:text-sm dark:bg-input/32"
+              className="min-h-24 w-full rounded-lg border border-input bg-background px-3 py-2 text-base shadow-xs/5 outline-none transition-shadow placeholder:text-muted-foreground/72 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 lg:text-sm dark:bg-input/32"
             />
           </div>
           <div className="grid gap-2">
@@ -379,7 +382,7 @@ function Composer({ ticketId, isStaff }: { readonly ticketId: string; readonly i
                 <img
                   src={previewUrl}
                   alt="Upload preview"
-                  className="max-h-48 w-auto rounded-lg border object-contain"
+                  className="h-auto max-h-48 w-full rounded-lg border object-contain sm:w-auto sm:max-w-sm"
                 />
                 <div>
                   <Button type="button" variant="ghost" size="sm" onClick={clearAttachment}>
@@ -412,12 +415,12 @@ function Composer({ ticketId, isStaff }: { readonly ticketId: string; readonly i
             )}
           </div>
           {isStaff && (
-            <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <label className="inline-flex min-h-11 cursor-pointer items-center gap-2.5 text-base lg:min-h-0 lg:text-sm">
               <input
                 type="checkbox"
                 checked={internal}
                 onChange={(event) => setInternal(event.target.checked)}
-                className="size-4 accent-primary"
+                className="size-5 shrink-0 accent-primary"
               />
               Internal note (clients never see this)
             </label>
@@ -624,7 +627,7 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
               changeStatus(event.target.value as (typeof ticketStatuses)[number])
             }
             disabled={ticket === undefined}
-            className="h-8.5 w-full rounded-lg border border-input bg-background px-3 text-base shadow-xs/5 outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 disabled:opacity-64 sm:h-7.5 sm:text-sm dark:bg-input/32"
+            className="h-11 w-full rounded-lg border border-input bg-background px-3 text-base shadow-xs/5 outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 disabled:opacity-64 lg:h-7.5 lg:text-sm dark:bg-input/32"
           >
             {ticketStatuses.map((value) => (
               <option key={value} value={value}>
@@ -640,7 +643,7 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
             value={ticket?.priority ?? "low"}
             onChange={(event) => changePriority(event.target.value as TicketPriority)}
             disabled={ticket === undefined}
-            className="h-8.5 w-full rounded-lg border border-input bg-background px-3 text-base shadow-xs/5 outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 disabled:opacity-64 sm:h-7.5 sm:text-sm dark:bg-input/32"
+            className="h-11 w-full rounded-lg border border-input bg-background px-3 text-base shadow-xs/5 outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 disabled:opacity-64 lg:h-7.5 lg:text-sm dark:bg-input/32"
           >
             {ticketPriorities.map((value) => (
               <option key={value} value={value}>
@@ -660,7 +663,7 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
               No other technicians available. The current owner is the only technician.
             </p>
           ) : (
-            <div className="flex gap-2">
+            <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
               <div className="min-w-0 flex-1">
                 <Autocomplete
                   key={pickerKey}
@@ -695,7 +698,12 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
                   </AutocompletePopup>
                 </Autocomplete>
               </div>
-              <Button type="submit" variant="outline" loading={assign.isPending}>
+              <Button
+                type="submit"
+                variant="outline"
+                loading={assign.isPending}
+                className="min-h-11 w-full shrink-0 lg:min-h-0 sm:w-auto"
+              >
                 Assign
               </Button>
             </div>

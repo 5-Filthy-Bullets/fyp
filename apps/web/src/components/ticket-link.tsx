@@ -21,9 +21,9 @@ export function TicketTitleLink({
       params={{ ticketId }}
       onMouseEnter={prefetch}
       onFocus={prefetch}
-      className="block truncate text-sm font-medium text-primary hover:underline"
+      className="flex min-h-11 items-center truncate text-sm font-medium text-primary hover:underline lg:min-h-0"
     >
-      {title}
+      <span className="truncate">{title}</span>
     </Link>
   );
 }

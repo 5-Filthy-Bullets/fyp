@@ -200,7 +200,7 @@ function FilingForm() {
                   value={form.productId}
                   onChange={(event) => setField("productId", event.target.value)}
                   aria-invalid={fieldErrors.productId !== undefined}
-                  className="h-8.5 w-full rounded-lg border border-input bg-background px-3 text-base shadow-xs/5 outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 sm:h-7.5 sm:text-sm dark:bg-input/32"
+                  className="h-11 w-full rounded-lg border border-input bg-background px-3 text-base shadow-xs/5 outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 lg:h-7.5 lg:text-sm dark:bg-input/32"
                 >
                   <option value="">Pick a product…</option>
                   {products.map((item) => (
@@ -236,7 +236,7 @@ function FilingForm() {
                   placeholder="What happened, what you expected, and what you already tried…"
                   rows={5}
                   aria-invalid={fieldErrors.description !== undefined}
-                  className="min-h-28 w-full rounded-lg border border-input bg-background px-3 py-2 text-base shadow-xs/5 outline-none transition-shadow placeholder:text-muted-foreground/72 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 sm:text-sm dark:bg-input/32"
+                  className="min-h-28 w-full rounded-lg border border-input bg-background px-3 py-2 text-base shadow-xs/5 outline-none transition-shadow placeholder:text-muted-foreground/72 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 lg:text-sm dark:bg-input/32"
                 />
                 {fieldErrors.description !== undefined && (
                   <p className="text-sm text-destructive">{fieldErrors.description}</p>
@@ -264,7 +264,7 @@ function FilingForm() {
                     id="priority"
                     value={form.priority}
                     onChange={(event) => setField("priority", event.target.value as TicketPriority)}
-                    className="h-8.5 w-full rounded-lg border border-input bg-background px-3 text-base shadow-xs/5 outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 sm:h-7.5 sm:text-sm dark:bg-input/32"
+                    className="h-11 w-full rounded-lg border border-input bg-background px-3 text-base shadow-xs/5 outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 lg:h-7.5 lg:text-sm dark:bg-input/32"
                   >
                     {ticketPriorities.map((value) => (
                       <option key={value} value={value}>

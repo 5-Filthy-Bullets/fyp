@@ -260,7 +260,7 @@ function CreateClientForm({ onDone }: { readonly onDone: () => void }) {
                 No products yet. Create them under Products first.
               </p>
             ) : (
-              <div className="flex flex-wrap gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                 {products.map((item) => {
                   const checked = form.productIds.includes(item.id);
                   return (
@@ -357,14 +357,15 @@ function ClientsList() {
           </ul>
         )}
         {pageCount > 1 && (
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs text-muted-foreground tabular-nums" aria-live="polite">
               Page {page + 1} of {pageCount} · {total} companies
             </p>
-            <div className="flex gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:flex">
               <Button
                 variant="outline"
                 size="sm"
+                className="min-h-11 lg:min-h-0"
                 disabled={page <= 0}
                 onClick={() => setPage(page - 1)}
               >
@@ -373,6 +374,7 @@ function ClientsList() {
               <Button
                 variant="outline"
                 size="sm"
+                className="min-h-11 lg:min-h-0"
                 disabled={page + 1 >= pageCount}
                 onClick={() => setPage(page + 1)}
               >
@@ -474,7 +476,7 @@ function OrgRow({ org }: { readonly org: AdminOrg }) {
         )}
       </div>
       {!editing && (
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
           <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
             Rename
           </Button>
