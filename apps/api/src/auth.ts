@@ -11,6 +11,10 @@ export interface AuthEnv {
   readonly BETTER_AUTH_URL: string;
   readonly WEB_URL: string;
   readonly BETTER_AUTH_LOG_LVL?: "debug" | "info" | "warn" | "error";
+  /** UploadThing token for the conversation attachment route. */
+  readonly UPLOADTHING_TOKEN: string;
+  /** Set to "development" locally so UploadThing hits its dev ingest. */
+  readonly ENVIRONMENT?: string;
 }
 
 export const createAuth = (env: AuthEnv) => {

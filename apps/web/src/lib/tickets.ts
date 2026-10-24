@@ -449,8 +449,11 @@ export const usePostTicketMessage = (ticketId: string) => {
         const optimistic: TicketMessage = {
           id: crypto.randomUUID(),
           authorId: null,
-          content: input.content,
+          content: input.content ?? "",
           visibility: input.visibility ?? "public",
+          attachmentUrl: input.attachmentUrl ?? null,
+          attachmentType: input.attachmentType ?? null,
+          attachmentName: input.attachmentName ?? null,
           createdAt: new Date().toISOString(),
         };
         queryClient.setQueryData<MessageListCache>(threadKey, (old) =>

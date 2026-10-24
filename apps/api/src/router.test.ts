@@ -998,6 +998,9 @@ describe("ticket.postMessage", () => {
         "test-user-id",
         "The line is still down.",
         "public",
+        null,
+        null,
+        null,
         new Date("2026-03-04T10:00:00Z"),
       ],
     ]);
@@ -1022,6 +1025,9 @@ describe("ticket.postMessage", () => {
         "test-user-id",
         "Waiting on parts.",
         "internal",
+        null,
+        null,
+        null,
         new Date("2026-03-04T10:05:00Z"),
       ],
     ]);
@@ -1064,6 +1070,56 @@ describe("ticket.postMessage", () => {
     });
 
     await expect(postMessage({ ticketId: "ticket-1", content: "   " })).rejects.toThrow();
+  });
+
+  it("saves a photo-only reply and records the attachment write", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([ticketRow()]);
+    fake.queueRows([
+      [
+        "message-3",
+        "ticket-1",
+        "test-user-id",
+        "",
+        "public",
+        "https://utfs.io/f/photo-1.jpg",
+        "image",
+        "line-photo.jpg",
+        new Date("2026-03-04T10:10:00Z"),
+      ],
+    ]);
+
+    const postMessage = router.ticket.postMessage.callable({ context: clientContext(fake) });
+    const { message } = await postMessage({
+      ticketId: "ticket-1",
+      content: "",
+      attachmentUrl: "https://utfs.io/f/photo-1.jpg",
+      attachmentType: "image",
+      attachmentName: "line-photo.jpg",
+    });
+
+    expect(message.attachmentUrl).toBe("https://utfs.io/f/photo-1.jpg");
+    expect(message.attachmentType).toBe("image");
+    const write = fake.queries.find((query) =>
+      query.sql.startsWith('insert into "ticket_message"'),
+    );
+    expect(write?.params).toContain("https://utfs.io/f/photo-1.jpg");
+    expect(write?.params).toContain("image");
+  });
+
+  it("rejects an attachment URL without its photo/video type", async () => {
+    const fake = fakeDatabase();
+
+    const postMessage = router.ticket.postMessage.callable({ context: clientContext(fake) });
+
+    await expect(
+      postMessage({
+        ticketId: "ticket-1",
+        content: "See this",
+        attachmentUrl: "https://utfs.io/f/photo-1.jpg",
+      }),
+    ).rejects.toThrow();
+    expect(fake.queries).toHaveLength(0);
   });
 });
 

@@ -131,8 +131,17 @@ const ticketOutput = z.object({
 const messageOutput = z.object({
   id: z.string().describe("Message id"),
   authorId: z.string().nullable().describe("Author user id, null when the account is gone"),
-  content: z.string().describe("Reply or note text"),
+  content: z.string().describe("Reply or note text, empty when the message is only an attachment"),
   visibility: z.enum(messageVisibility.enumValues).describe("public replies vs staff-only notes"),
+  attachmentUrl: z
+    .string()
+    .nullable()
+    .describe("UploadThing URL for a photo or video, null for text-only"),
+  attachmentType: z
+    .enum(["image", "video"])
+    .nullable()
+    .describe("Photo or video, null for text-only"),
+  attachmentName: z.string().nullable().describe("Original file name, null for text-only"),
   createdAt: z.string().describe("ISO 8601 creation timestamp"),
 });
 
@@ -874,7 +883,7 @@ export const ticketRouter = {
       path: "/tickets/{ticketId}/messages",
       summary: "List messages on a ticket",
       description:
-        "Message thread oldest first. Staff see every message including internal notes; clients see only public replies. Clients asking for another org's ticket get not-found rather than forbidden.",
+        "Message thread oldest first. Staff see every message including internal notes; clients see only public replies. Photo and video attachments ride along as URLs. Clients asking for another org's ticket get not-found rather than forbidden.",
       tags: ["Tickets"],
     })
     .input(z.object({ ticketId: z.string().min(1).describe("Ticket to read") }))
@@ -897,19 +906,57 @@ export const ticketRouter = {
       path: "/tickets/{ticketId}/messages",
       summary: "Reply on a ticket",
       description:
-        "Posts a public reply or, for staff only, an internal note. Clients can only touch their own org's tickets; posting internal as a client is rejected.",
+        "Posts a public reply or, for staff only, an internal note. Text, a photo/video attachment, or both. Upload files to /api/uploadthing first, then pass the returned URL here. Clients can only touch their own org's tickets; posting internal as a client is rejected.",
       tags: ["Tickets"],
       successStatus: 201,
     })
     .input(
-      z.object({
-        ticketId: z.string().min(1).describe("Ticket to reply to"),
-        content: z.string().trim().min(1).max(4000).describe("Reply or note text"),
-        visibility: z
-          .enum(messageVisibility.enumValues)
-          .default("public")
-          .describe("public reply or internal staff note"),
-      }),
+      z
+        .object({
+          ticketId: z.string().min(1).describe("Ticket to reply to"),
+          content: z
+            .string()
+            .trim()
+            .max(4000)
+            .default("")
+            .describe("Reply or note text, may be empty when an attachment is present"),
+          visibility: z
+            .enum(messageVisibility.enumValues)
+            .default("public")
+            .describe("public reply or internal staff note"),
+          attachmentUrl: z
+            .url()
+            .max(2048)
+            .optional()
+            .describe("UploadThing URL from the conversationAttachment route"),
+          attachmentType: z
+            .enum(["image", "video"])
+            .optional()
+            .describe("Photo or video, must pair with an attachment URL"),
+          attachmentName: z
+            .string()
+            .trim()
+            .min(1)
+            .max(255)
+            .optional()
+            .describe("Original file name for the download link"),
+        })
+        .superRefine((value, ctx) => {
+          if (value.content === "" && value.attachmentUrl === undefined) {
+            ctx.addIssue({
+              code: "custom",
+              message: "Write a reply or attach a photo or video.",
+              path: ["content"],
+            });
+          }
+          if ((value.attachmentUrl === undefined) !== (value.attachmentType === undefined)) {
+            ctx.addIssue({
+              code: "custom",
+              message: "An attachment needs both a URL and its photo/video type.",
+              path: ["attachmentUrl"],
+            });
+          }
+        }),
     )
     .output(z.object({ message: messageOutput }))
     .handler(async ({ context, input }) => {
@@ -932,6 +979,9 @@ export const ticketRouter = {
           authorId: caller.userId,
           content: input.content,
           visibility: input.visibility,
+          attachmentUrl: input.attachmentUrl ?? null,
+          attachmentType: input.attachmentType ?? null,
+          attachmentName: input.attachmentName ?? null,
         })
         .returning();
 
@@ -947,6 +997,9 @@ export const ticketRouter = {
           authorId: created.authorId,
           content: created.content,
           visibility: created.visibility,
+          attachmentUrl: created.attachmentUrl,
+          attachmentType: created.attachmentType,
+          attachmentName: created.attachmentName,
           createdAt: created.createdAt.toISOString(),
         },
       };
@@ -1083,6 +1136,9 @@ const selectMessages = async (db: Database, filter: MessageFilter) => {
       authorId: ticketMessage.authorId,
       content: ticketMessage.content,
       visibility: ticketMessage.visibility,
+      attachmentUrl: ticketMessage.attachmentUrl,
+      attachmentType: ticketMessage.attachmentType,
+      attachmentName: ticketMessage.attachmentName,
       createdAt: ticketMessage.createdAt,
     })
     .from(ticketMessage)
@@ -1094,6 +1150,9 @@ const selectMessages = async (db: Database, filter: MessageFilter) => {
     authorId: row.authorId,
     content: row.content,
     visibility: row.visibility,
+    attachmentUrl: row.attachmentUrl,
+    attachmentType: row.attachmentType,
+    attachmentName: row.attachmentName,
     createdAt: row.createdAt.toISOString(),
   }));
 };
