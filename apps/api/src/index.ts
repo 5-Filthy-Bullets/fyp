@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { RPCHandler } from "@orpc/server/fetch";
+import { createRouteHandler } from "uploadthing/server";
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { OpenAPIReferencePlugin } from "@orpc/openapi/plugins";
 // Must be the /zod4 entrypoint: the default `@orpc/zod` export targets zod 3
@@ -9,6 +10,7 @@ import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { createAuth, type AuthEnv } from "./auth";
 import { createDatabase } from "./db/client";
 import { router } from "./router";
+import { uploadRouter } from "./uploadthing";
 
 type Env = {
   Bindings: AuthEnv;
@@ -75,6 +77,40 @@ app.all("/rpc/*", async (c) => {
   }
 
   return c.text("Not found", 404);
+});
+
+app.use("/api/uploadthing/*", async (c, next) => {
+  return cors({
+    origin: c.env.WEB_URL,
+    credentials: true,
+  })(c, next);
+});
+
+/**
+ * Photo and video uploads for the conversation thread. Workers has no
+ * process.env and no init.cache, so the token, dev flag, fetch shim, and
+ * waitUntil hook come from the Worker env per request.
+ */
+app.all("/api/uploadthing/*", async (c) => {
+  const handlers = createRouteHandler({
+    router: uploadRouter,
+    config: {
+      token: c.env.UPLOADTHING_TOKEN,
+      isDev: c.env.ENVIRONMENT === "development",
+      fetch: (url, init) => {
+        if (init && "cache" in init) delete init.cache;
+        return fetch(url, init);
+      },
+      handleDaemonPromise: (promise) => c.executionCtx.waitUntil(promise),
+    },
+  });
+  const request = c.req.raw;
+  if (request.method !== "GET" && request.method !== "POST") {
+    return c.text("Method not allowed", 405);
+  }
+  // v7's createRouteHandler resolves to one function taking the raw
+  // request, not a per-method map, so it runs directly.
+  return handlers(request);
 });
 
 app.get("/", (c) => c.text("API is running"));

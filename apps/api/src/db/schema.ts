@@ -100,6 +100,12 @@ export const ticket = pgTable("ticket", {
 });
 
 /**
+ * What kind of file a ticket message carries. Photos render inline as
+ * images, videos render with a player. Null means a text-only reply.
+ */
+export const messageAttachmentType = pgEnum("message_attachment_type", ["image", "video"]);
+
+/**
  * Replies and staff notes on a ticket, oldest first. The author is nullable
  * with set-null so deleting an account never deletes the conversation that
  * account took part in.
@@ -114,6 +120,11 @@ export const ticketMessage = pgTable("ticket_message", {
   }),
   content: text("content").notNull(),
   visibility: messageVisibility("visibility").notNull().default("public"),
+  /** UploadThing URL, set when the reply carries a photo or video. */
+  attachmentUrl: text("attachment_url"),
+  attachmentType: messageAttachmentType("attachment_type"),
+  /** Original file name, shown beside the download link. */
+  attachmentName: text("attachment_name"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

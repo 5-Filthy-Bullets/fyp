@@ -227,7 +227,16 @@ export const userRow = (
 };
 
 /** Column order of the message select, for positional fake rows. */
-export const messageColumns = ["id", "authorId", "content", "visibility", "createdAt"] as const;
+export const messageColumns = [
+  "id",
+  "authorId",
+  "content",
+  "visibility",
+  "attachmentUrl",
+  "attachmentType",
+  "attachmentName",
+  "createdAt",
+] as const;
 
 /** Builds a fake message row in the order the router selects the columns. */
 export const messageRow = (
@@ -238,6 +247,9 @@ export const messageRow = (
     authorId: "test-user-id",
     content: "Looking into the controller logs now.",
     visibility: "public",
+    attachmentUrl: null,
+    attachmentType: null,
+    attachmentName: null,
     createdAt: new Date("2026-03-04T10:00:00Z"),
     ...overrides,
   };

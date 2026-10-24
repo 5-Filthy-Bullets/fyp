@@ -1,7 +1,7 @@
 import { Link, useParams } from "@tanstack/react-router";
 import { ArrowLeft, Inbox, TriangleAlert } from "lucide-react";
 import { useState } from "react";
-import type { FormEvent } from "react";
+import type { ChangeEvent, FormEvent } from "react";
 import { z } from "zod";
 import { AppShell } from "@/components/app-shell";
 import { SessionGuard } from "@/components/auth-guard";
@@ -23,6 +23,8 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { toastManager } from "@/components/ui/toast";
 import { useCaller } from "@/lib/session";
+import { useUploadThing } from "@/lib/uploadthing";
+import type { ConversationAttachment } from "@/lib/uploadthing";
 import {
   formatTicketDate,
   priorityLabel,
@@ -44,7 +46,7 @@ const escalateSchema = z.object({
 });
 
 const replySchema = z.object({
-  content: z.string().trim().min(1, "Write a reply first.").max(4000),
+  content: z.string().trim().max(4000),
 });
 
 export function TicketDetailPage() {
@@ -193,7 +195,7 @@ function MessageThread({ ticketId }: { readonly ticketId: string }) {
 
 function MessageRow({ message }: { readonly message: TicketMessage }) {
   return (
-    <li className="grid gap-1 px-6 py-3.5">
+    <li className="grid gap-2 px-6 py-3.5">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-muted-foreground tabular-nums">
           {formatTicketDate(message.createdAt)}
@@ -204,7 +206,35 @@ function MessageRow({ message }: { readonly message: TicketMessage }) {
           </Badge>
         )}
       </div>
-      <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+      {message.content !== "" && <p className="text-sm whitespace-pre-wrap">{message.content}</p>}
+      {message.attachmentUrl !== null && message.attachmentType === "image" && (
+        <a href={message.attachmentUrl} target="_blank" rel="noreferrer" className="block max-w-md">
+          <img
+            src={message.attachmentUrl}
+            alt={message.attachmentName ?? "Attached photo"}
+            loading="lazy"
+            className="max-h-80 w-auto rounded-lg border object-contain"
+          />
+        </a>
+      )}
+      {message.attachmentUrl !== null && message.attachmentType === "video" && (
+        <video
+          src={message.attachmentUrl}
+          controls
+          preload="metadata"
+          className="max-h-80 w-full max-w-md rounded-lg border"
+        />
+      )}
+      {message.attachmentUrl !== null && (
+        <a
+          href={message.attachmentUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="w-fit max-w-full truncate text-xs text-muted-foreground underline underline-offset-2"
+        >
+          {message.attachmentName ?? message.attachmentUrl}
+        </a>
+      )}
     </li>
   );
 }
@@ -214,6 +244,39 @@ function Composer({ ticketId, isStaff }: { readonly ticketId: string; readonly i
   const [content, setContent] = useState("");
   const [internal, setInternal] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [attachment, setAttachment] = useState<ConversationAttachment | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  const upload = useUploadThing("conversationAttachment", {
+    onClientUploadComplete: (files) => {
+      const first = files[0];
+      if (!first) return;
+      const serverType = (first.serverData as { type?: "image" | "video" } | null)?.type;
+      const kind: "image" | "video" =
+        serverType ?? (first.type.startsWith("video/") ? "video" : "image");
+      setAttachment({ url: first.url, type: kind, name: first.name });
+      setError(null);
+    },
+    onUploadError: (uploadError) => {
+      setError(uploadError.message || "The file did not upload. Try again.");
+    },
+  });
+
+  const pickFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(URL.createObjectURL(file));
+    setError(null);
+    void upload.startUpload([file]);
+  };
+
+  const clearAttachment = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+    setAttachment(null);
+  };
 
   const send = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -223,25 +286,46 @@ function Composer({ ticketId, isStaff }: { readonly ticketId: string; readonly i
       setError(parsed.error.issues[0]?.message ?? "Write a reply first.");
       return;
     }
+    if (parsed.data.content === "" && attachment === null) {
+      setError("Write a reply or attach a photo or video.");
+      return;
+    }
+    if (upload.isUploading) {
+      setError("Wait for the upload to finish, then send.");
+      return;
+    }
 
     // Snapshot the draft and clear at once: the optimistic row already
     // shows the reply, so holding the text until the ack lands just
     // looks stuck. A failed send puts the draft back for retry.
     const draft = parsed.data.content;
     const draftInternal = isStaff && internal;
+    const draftAttachment = attachment;
+    const draftPreview = previewUrl;
     setError(null);
     setContent("");
     setInternal(false);
+    setAttachment(null);
+    setPreviewUrl(null);
     post.mutate(
       {
         ticketId,
         content: draft,
         ...(draftInternal ? { visibility: "internal" as const } : {}),
+        ...(draftAttachment
+          ? {
+              attachmentUrl: draftAttachment.url,
+              attachmentType: draftAttachment.type,
+              attachmentName: draftAttachment.name,
+            }
+          : {}),
       },
       {
         onError: (mutationError) => {
           setContent(draft);
           setInternal(draftInternal);
+          setAttachment(draftAttachment);
+          setPreviewUrl(draftPreview);
           setError(
             mutationError instanceof Error ? mutationError.message : "The reply was not sent.",
           );
@@ -273,6 +357,60 @@ function Composer({ ticketId, isStaff }: { readonly ticketId: string; readonly i
               className="min-h-24 w-full rounded-lg border border-input bg-background px-3 py-2 text-base shadow-xs/5 outline-none transition-shadow placeholder:text-muted-foreground/72 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 sm:text-sm dark:bg-input/32"
             />
           </div>
+          <div className="grid gap-2">
+            <Label htmlFor="attachment">Photo or video</Label>
+            <Input
+              id="attachment"
+              type="file"
+              accept="image/*,video/*"
+              onChange={pickFile}
+              disabled={upload.isUploading}
+            />
+            <p className="text-xs text-muted-foreground">
+              Up to 4 photos at 8MB each, or 1 video at 64MB.
+            </p>
+            {upload.isUploading && (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+                <Spinner className="size-4" aria-hidden /> Uploading…
+              </p>
+            )}
+            {previewUrl !== null && attachment?.type === "image" && (
+              <div className="grid gap-1.5">
+                <img
+                  src={previewUrl}
+                  alt="Upload preview"
+                  className="max-h-48 w-auto rounded-lg border object-contain"
+                />
+                <div>
+                  <Button type="button" variant="ghost" size="sm" onClick={clearAttachment}>
+                    Remove
+                  </Button>
+                </div>
+              </div>
+            )}
+            {previewUrl !== null && attachment?.type === "video" && (
+              <div className="grid gap-1.5">
+                <video
+                  src={previewUrl}
+                  controls
+                  preload="metadata"
+                  className="max-h-48 w-full max-w-sm rounded-lg border"
+                />
+                <div>
+                  <Button type="button" variant="ghost" size="sm" onClick={clearAttachment}>
+                    Remove
+                  </Button>
+                </div>
+              </div>
+            )}
+            {previewUrl !== null && attachment === null && !upload.isUploading && (
+              <div>
+                <Button type="button" variant="ghost" size="sm" onClick={clearAttachment}>
+                  Remove
+                </Button>
+              </div>
+            )}
+          </div>
           {isStaff && (
             <label className="flex cursor-pointer items-center gap-2 text-sm">
               <input
@@ -295,8 +433,12 @@ function Composer({ ticketId, isStaff }: { readonly ticketId: string; readonly i
             </p>
           )}
           <div>
-            <Button type="submit">
-              {isStaff && internal ? "Add internal note" : "Send reply"}
+            <Button type="submit" disabled={upload.isUploading || post.isPending}>
+              {upload.isUploading
+                ? "Uploading…"
+                : isStaff && internal
+                  ? "Add internal note"
+                  : "Send reply"}
             </Button>
           </div>
         </form>
