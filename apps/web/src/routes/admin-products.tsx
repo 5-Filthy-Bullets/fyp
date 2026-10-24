@@ -183,14 +183,15 @@ function ProductsList() {
           </Table>
         )}
         {pageCount > 1 && (
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs text-muted-foreground tabular-nums" aria-live="polite">
               Page {page + 1} of {pageCount} · {total} products
             </p>
-            <div className="flex gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:flex">
               <Button
                 variant="outline"
                 size="sm"
+                className="min-h-11 lg:min-h-0"
                 disabled={page <= 0}
                 onClick={() => setPage(page - 1)}
               >
@@ -199,6 +200,7 @@ function ProductsList() {
               <Button
                 variant="outline"
                 size="sm"
+                className="min-h-11 lg:min-h-0"
                 disabled={page + 1 >= pageCount}
                 onClick={() => setPage(page + 1)}
               >
@@ -232,7 +234,7 @@ function EntitlementEditor() {
             id="entitlement-org"
             value={orgId}
             onChange={(event) => setOrgId(event.target.value)}
-            className="h-8.5 w-full rounded-lg border border-input bg-background px-3 text-base shadow-xs/5 outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 sm:h-7.5 sm:text-sm dark:bg-input/32"
+            className="h-11 w-full rounded-lg border border-input bg-background px-3 text-base shadow-xs/5 outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 lg:h-7.5 lg:text-sm dark:bg-input/32"
           >
             <option value="">Pick a company…</option>
             {orgs.map((org) => (
@@ -324,7 +326,7 @@ function EntitlementForm({ organizationId }: { readonly organizationId: string }
       {products.length === 0 ? (
         <p className="text-sm text-muted-foreground">No products in the catalog yet.</p>
       ) : (
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
           {products.map((item) => {
             const active = current.includes(item.id);
             return (

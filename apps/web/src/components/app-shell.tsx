@@ -168,7 +168,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
             role="dialog"
             aria-modal="true"
             aria-label="Navigation"
-            className="absolute inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-sidebar-border bg-sidebar"
+            className="absolute inset-y-0 left-0 z-50 flex w-[min(20rem,85vw)] max-w-full flex-col border-r border-sidebar-border bg-sidebar"
           >
             {/* The drawer is always expanded: desktop collapse must not leak in. */}
             <SidebarContent role={role} collapsed={false} onNavigate={() => setMobileOpen(false)} />
@@ -176,13 +176,16 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
         </div>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 min-h-dvh flex-1 flex-col overflow-x-clip">
         <Topbar
           collapsed={collapsed}
           onToggleCollapse={toggleCollapsed}
           onOpenMobile={() => setMobileOpen(true)}
         />
-        <main id="main-content" className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6">
+        <main
+          id="main-content"
+          className="mx-auto grid w-full max-w-5xl min-w-0 flex-1 content-start gap-6 px-4 py-6 sm:px-6"
+        >
           {children}
         </main>
       </div>
@@ -303,7 +306,7 @@ function NavLink({
       aria-label={collapsed ? item.label : undefined}
       title={collapsed ? item.label : undefined}
       className={cn(
-        "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-none",
+        "flex min-h-11 items-center gap-2.5 rounded-lg px-2.5 py-2 text-base font-medium transition-colors focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-none lg:min-h-0 lg:text-sm",
         active
           ? "bg-sidebar-accent text-sidebar-accent-foreground"
           : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
@@ -367,13 +370,14 @@ function Topbar({
 }) {
   return (
     <header className="sticky top-0 z-30 border-b bg-background/80 backdrop-blur">
-      <div className="mx-auto flex h-14 w-full max-w-5xl items-center gap-2 px-4 sm:px-6">
+      <div className="mx-auto flex h-14 min-h-14 w-full max-w-5xl min-w-0 items-center gap-1 px-4 sm:gap-2 sm:px-6">
         <Button
           variant="ghost"
-          size="icon-sm"
-          className="md:hidden"
+          size="icon"
+          className="min-h-11 min-w-11 md:hidden"
           onClick={onOpenMobile}
           aria-label="Open navigation"
+          aria-expanded={false}
         >
           <MenuIcon aria-hidden />
         </Button>

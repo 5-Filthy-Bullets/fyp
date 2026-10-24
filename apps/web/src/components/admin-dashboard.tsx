@@ -113,11 +113,11 @@ export function AdminDashboard() {
                   </li>
                 ))}
               </ul>
-              <div className="border-t px-6 py-3">
+              <div className="border-t px-4 py-1 sm:px-6 lg:py-3">
                 <Link
                   to="/tickets"
                   search={{ escalated: "true" }}
-                  className="text-sm font-medium text-primary hover:underline"
+                  className="inline-flex min-h-11 items-center text-sm font-medium text-primary hover:underline lg:min-h-0"
                 >
                   View all escalated
                 </Link>

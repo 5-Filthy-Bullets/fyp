@@ -335,7 +335,7 @@ function TicketsList() {
       />
 
       {role === "technician" && (
-        <div className="flex flex-wrap gap-2" role="tablist" aria-label="Ticket scope">
+        <div className="flex max-w-full flex-wrap gap-2" role="tablist" aria-label="Ticket scope">
           {techTabs.map((tab) => (
             <ScopeTab
               key={tab}
@@ -355,7 +355,7 @@ function TicketsList() {
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid min-w-0 gap-4 sm:grid-cols-2">
         <SegmentedFilter<StatusFilter>
           label="Status"
           value={status}
@@ -437,57 +437,92 @@ function TicketsList() {
           </CardPanel>
         </Card>
       ) : (
-        <div className="grid gap-3">
-          <Table variant="card">
-            <TableHeader>
-              {table.getHeaderGroups().map((headerGroup) => (
-                <TableRow key={headerGroup.id}>
-                  {headerGroup.headers.map((header) => {
-                    const sorted = header.column.getIsSorted();
-                    return (
-                      <TableHead
-                        key={header.id}
-                        aria-sort={
-                          sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : "none"
-                        }
-                      >
-                        {header.isPlaceholder ? null : (
-                          <button
-                            type="button"
-                            onClick={header.column.getToggleSortingHandler()}
-                            className="inline-flex cursor-pointer items-center gap-1.5 hover:text-foreground"
-                          >
-                            {flexRender(header.column.columnDef.header, header.getContext())}
-                            <SortIcon direction={sorted} />
-                          </button>
-                        )}
-                      </TableHead>
-                    );
-                  })}
-                </TableRow>
-              ))}
-            </TableHeader>
-            <TableBody>
-              {table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id}>
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+        <div className="grid min-w-0 gap-3">
+          {/* Mobile-first cards: no horizontal scroll below lg. */}
+          <ul className="grid gap-3 lg:hidden">
+            {table.getRowModel().rows.map((row) => {
+              const ticket = row.original;
+              return (
+                <li key={ticket.id}>
+                  <Card>
+                    <CardPanel className="grid gap-2 p-4">
+                      <TicketTitleLink ticketId={ticket.id} title={ticket.title} />
+                      <p className="text-xs break-words text-muted-foreground">
+                        {isStaff
+                          ? `${ticket.organizationName} · ${ticket.productName} · ${ticket.reporterName}`
+                          : `${ticket.productName} · ${ticket.reporterName}`}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <StatusBadge status={ticket.status} />
+                        <PriorityBadge priority={ticket.priority} />
+                        {ticket.escalated && <Badge variant="error">Escalated</Badge>}
+                      </div>
+                      <p className="text-xs text-muted-foreground tabular-nums">
+                        {formatTicketDate(ticket.createdAt)}
+                      </p>
+                    </CardPanel>
+                  </Card>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="hidden lg:block">
+            <Table variant="card">
+              <TableHeader>
+                {table.getHeaderGroups().map((headerGroup) => (
+                  <TableRow key={headerGroup.id}>
+                    {headerGroup.headers.map((header) => {
+                      const sorted = header.column.getIsSorted();
+                      return (
+                        <TableHead
+                          key={header.id}
+                          aria-sort={
+                            sorted === "asc"
+                              ? "ascending"
+                              : sorted === "desc"
+                                ? "descending"
+                                : "none"
+                          }
+                        >
+                          {header.isPlaceholder ? null : (
+                            <button
+                              type="button"
+                              onClick={header.column.getToggleSortingHandler()}
+                              className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 hover:text-foreground lg:min-h-0"
+                            >
+                              {flexRender(header.column.columnDef.header, header.getContext())}
+                              <SortIcon direction={sorted} />
+                            </button>
+                          )}
+                        </TableHead>
+                      );
+                    })}
+                  </TableRow>
+                ))}
+              </TableHeader>
+              <TableBody>
+                {table.getRowModel().rows.map((row) => (
+                  <TableRow key={row.id}>
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell key={cell.id}>
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
           {pageCount > 1 && (
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs text-muted-foreground tabular-nums" aria-live="polite">
                 Page {pageIndex + 1} of {pageCount} · {filtered.length} tickets
               </p>
-              <div className="flex gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:flex">
                 <Button
                   variant="outline"
                   size="sm"
+                  className="min-h-11 lg:min-h-0"
                   disabled={!table.getCanPreviousPage()}
                   onClick={() => table.previousPage()}
                 >
@@ -496,6 +531,7 @@ function TicketsList() {
                 <Button
                   variant="outline"
                   size="sm"
+                  className="min-h-11 lg:min-h-0"
                   disabled={!table.getCanNextPage()}
                   onClick={() => table.nextPage()}
                 >
@@ -549,7 +585,7 @@ function SegmentedFilter<T extends string>({
   readonly onSelect: (next: T) => void;
 }) {
   return (
-    <fieldset className="grid content-start gap-1.5">
+    <fieldset className="grid min-w-0 content-start gap-1.5">
       <legend className="text-sm font-medium">{label}</legend>
       <ToggleGroupPrimitive
         value={[value]}

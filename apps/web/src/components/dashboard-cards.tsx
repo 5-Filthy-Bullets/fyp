@@ -48,16 +48,18 @@ export function StatCard({ label, value, icon: Icon, to, search }: StatCardProps
     <Link
       to={to}
       search={search}
-      className="rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      className="min-w-0 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >
-      <Card className="transition-colors hover:bg-accent/50">
-        <CardPanel className="flex items-center gap-3 p-5">
+      <Card className="h-full transition-colors hover:bg-accent/50 @container">
+        <CardPanel className="flex min-h-11 items-center gap-3 p-4 sm:p-5">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
             <Icon className="size-4.5" aria-hidden />
           </span>
-          <span className="min-w-0">
+          <span className="min-w-0 flex-1">
             <span className="block truncate text-sm text-muted-foreground">{label}</span>
-            <span className="block text-2xl font-semibold tracking-tight">{value}</span>
+            <span className="block text-[clamp(1.25rem,1rem+3vw,1.5rem)] leading-tight font-semibold tracking-tight tabular-nums">
+              {value}
+            </span>
           </span>
         </CardPanel>
       </Card>
@@ -99,7 +101,8 @@ function QueryError({
   );
 }
 
-const recentRowGrid = "grid gap-1.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-3";
+const recentRowGrid =
+  "grid min-w-0 gap-1.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-3";
 
 /**
  * Recent-activity table shared by dashboards: title, product/org meta line,
@@ -149,15 +152,15 @@ export function RecentTickets({
         <CardPanel className="grid gap-0 p-0">
           <ul className="divide-y">
             {tickets.map((ticket) => (
-              <li key={ticket.id} className={cn(recentRowGrid, "px-6 py-3.5")}>
+              <li key={ticket.id} className={cn(recentRowGrid, "px-4 py-3.5 sm:px-6")}>
                 <div className="min-w-0">
                   <TicketTitleLink ticketId={ticket.id} title={ticket.title} />
                   <p className="truncate text-xs text-muted-foreground">{meta(ticket)}</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <StatusBadge status={ticket.status} />
                   {ticket.escalated && <Badge variant="error">Escalated</Badge>}
-                  <span className="text-xs text-muted-foreground tabular-nums">
+                  <span className="text-xs break-words text-muted-foreground tabular-nums">
                     {formatTicketDate(ticket.createdAt)}
                   </span>
                 </div>
@@ -165,8 +168,11 @@ export function RecentTickets({
             ))}
           </ul>
           {footerTo !== undefined && footerLabel !== undefined && (
-            <div className="border-t px-6 py-3">
-              <Link to={footerTo} className="text-sm font-medium text-primary hover:underline">
+            <div className="border-t px-4 sm:px-6">
+              <Link
+                to={footerTo}
+                className="inline-flex min-h-11 items-center text-sm font-medium text-primary hover:underline lg:min-h-0"
+              >
                 {footerLabel}
               </Link>
             </div>

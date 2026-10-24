@@ -132,8 +132,48 @@
     @apply border-border outline-ring/50;
   }
 
+  html {
+    /* Mobile-first: never let a wide child push the page sideways. */
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
   body {
     @apply bg-background text-foreground;
+    max-width: 100%;
+    overflow-x: clip;
+    /* Fluid base: 16px floor stops iOS zoom, scales gently on large screens. */
+    font-size: clamp(1rem, 0.95rem + 0.25vw, 1.0625rem);
+  }
+
+  /* Responsive images by default: remote attachments get intrinsic sizing
+     from width/height attrs when present, this keeps them inside the column. */
+  img,
+  video,
+  canvas,
+  svg {
+    max-width: 100%;
+  }
+
+  img,
+  video {
+    height: auto;
+  }
+
+  /* 16px floor on form text stops iOS auto-zoom on focus. Components
+     already use text-base mobile / sm:text-sm, this is the backstop. */
+  input,
+  select,
+  textarea {
+    font-size: 1rem;
+  }
+
+  @media (min-width: 64rem) {
+    input,
+    select,
+    textarea {
+      font-size: 0.875rem;
+    }
   }
 
   code,
