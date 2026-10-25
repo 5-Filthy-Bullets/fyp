@@ -1,5 +1,13 @@
 import { ORPCError, os } from "@orpc/server";
 import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm";
+import {
+  notifyEscalated,
+  notifyNewReply,
+  notifyStatusChanged,
+  notifyTicketAssigned,
+  notifyTicketCreated,
+} from "./email/notify";
+import type { EmailSender } from "./email/types";
 import { z } from "zod";
 import {
   assertCallerActive,
@@ -50,6 +58,13 @@ export interface RpcContext {
   readonly headers: Headers;
   readonly auth: SessionReader;
   readonly db: Database;
+  /**
+   * Outbound mail. Undefined in tests that do not cover notifications,
+   * in which case the notifiers skip silently.
+   */
+  readonly email?: EmailSender;
+  /** Web app origin, used to build ticket links in mail bodies. */
+  readonly webUrl?: string;
 }
 
 const protectedProcedure = os.$context<RpcContext>().use(async ({ context, next }) => {
@@ -125,6 +140,7 @@ const ticketOutput = z.object({
   productId: z.string().describe("Product the ticket is about"),
   productName: z.string().describe("Product display name"),
   assignedTo: z.string().nullable().describe("Staff user id, null when unclaimed"),
+  createdBy: z.string().nullable().describe("Reporter user id, null when the account is gone"),
   createdAt: z.string().describe("ISO 8601 creation timestamp"),
 });
 
@@ -544,6 +560,7 @@ export const ticketRouter = {
           description: input.description,
           reporterName: input.reporterName,
           priority: input.priority,
+          createdBy: context.caller.userId,
         })
         .returning();
 
@@ -561,6 +578,9 @@ export const ticketRouter = {
           message: "The ticket was saved but could not be read back.",
         });
       }
+
+      // Staff triage the queue off this mail. A failed send never fails the filing.
+      await notifyTicketCreated(context.db, context.email, webUrlOf(context), saved);
 
       return { ticket: toTicketOutput(saved) };
     }),
@@ -674,6 +694,17 @@ export const ticketRouter = {
         });
       }
 
+      // Priority-only tweaks stay quiet; a status move is what the client waits on.
+      if (input.status !== undefined) {
+        await notifyStatusChanged(
+          context.db,
+          context.email,
+          webUrlOf(context),
+          changed,
+          context.caller.userId,
+        );
+      }
+
       return { ticket: toTicketOutput(changed) };
     }),
 
@@ -695,7 +726,7 @@ export const ticketRouter = {
     .output(z.object({ ticket: ticketOutput }))
     .handler(async ({ context, input }) => {
       const [assignee] = await context.db
-        .select({ id: user.id, role: user.role, banned: user.banned })
+        .select({ id: user.id, role: user.role, banned: user.banned, name: user.name })
         .from(user)
         .where(eq(user.id, input.assigneeId))
         .limit(1);
@@ -751,6 +782,15 @@ export const ticketRouter = {
           message: "The ticket was updated but could not be read back.",
         });
       }
+
+      await notifyTicketAssigned(
+        context.db,
+        context.email,
+        webUrlOf(context),
+        changed,
+        input.assigneeId,
+        assignee.name,
+      );
 
       return { ticket: toTicketOutput(changed) };
     }),
@@ -829,6 +869,8 @@ export const ticketRouter = {
           message: "The ticket was updated but could not be read back.",
         });
       }
+
+      await notifyEscalated(context.db, context.email, webUrlOf(context), changed, input.reason);
 
       return { ticket: toTicketOutput(changed) };
     }),
@@ -969,7 +1011,7 @@ export const ticketRouter = {
         });
       }
 
-      await loadTicketForCaller(context.db, caller, input.ticketId);
+      const found = await loadTicketForCaller(context.db, caller, input.ticketId);
 
       const [created] = await context.db
         .insert(ticketMessage)
@@ -988,6 +1030,16 @@ export const ticketRouter = {
       if (!created) {
         throw new ORPCError("INTERNAL_SERVER_ERROR", {
           message: "The reply could not be saved.",
+        });
+      }
+
+      // Internal notes stay silent by design; public replies notify the other side.
+      if (created.visibility === "public") {
+        await notifyNewReply(context.db, context.email, webUrlOf(context), found, {
+          authorUserId: caller.userId,
+          authorName: context.session.user.name,
+          authorIsStaff: isStaff,
+          excerpt: replyExcerpt(created.content, created.attachmentName),
         });
       }
 
@@ -1061,7 +1113,20 @@ type TicketJoin = {
   readonly productId: string;
   readonly productName: string;
   readonly assignedTo: string | null;
+  readonly createdBy: string | null;
   readonly createdAt: Date;
+};
+
+/** Web origin for ticket links in mail. Empty when the caller did not provide one. */
+const webUrlOf = (context: RpcContext): string => context.webUrl ?? "";
+
+/** One-line preview for reply mail. Attachment-only replies name the file. */
+const replyExcerpt = (content: string, attachmentName: string | null): string => {
+  const trimmed = content.trim();
+  if (trimmed !== "") {
+    return trimmed.length > 140 ? `${trimmed.slice(0, 140)}...` : trimmed;
+  }
+  return attachmentName === null ? "(empty reply)" : `Attachment: ${attachmentName}`;
 };
 
 /** Timestamps cross the wire as ISO strings, so the UI never parses Dates. */
@@ -1079,6 +1144,7 @@ const toTicketOutput = (row: TicketJoin) => ({
   productId: row.productId,
   productName: row.productName,
   assignedTo: row.assignedTo,
+  createdBy: row.createdBy,
   createdAt: row.createdAt.toISOString(),
 });
 
@@ -1107,6 +1173,7 @@ const selectTickets = async (db: Database, filter: TicketFilter): Promise<Ticket
       productId: ticket.productId,
       productName: product.name,
       assignedTo: ticket.assignedTo,
+      createdBy: ticket.createdBy,
       createdAt: ticket.createdAt,
     })
     .from(ticket)
