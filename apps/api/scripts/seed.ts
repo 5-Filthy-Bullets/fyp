@@ -1,6 +1,6 @@
 /**
- * Seeds the demo slice: one client org, two products linked to it, one client
- * user, one technician. Run with `pnpm --filter api db:seed`.
+ * Seeds the demo slice: one client org, two products linked to it, one admin,
+ * one client user, one technician. Run with `pnpm --filter api db:seed`.
  *
  * Idempotent: every insert is an upsert keyed on a stable id, so re-running
  * tops up missing rows instead of duplicating them.
@@ -41,7 +41,7 @@ const products = [
 const upsertUser = async (input: {
   email: string;
   name: string;
-  role: "client" | "technician";
+  role: "admin" | "client" | "technician";
   organizationId: string | null;
 }) => {
   const existing = await db
@@ -93,6 +93,13 @@ const main = async () => {
   }
 
   await upsertUser({
+    email: "admin@reliable.test",
+    name: "Jordan Blake",
+    role: "admin",
+    organizationId: null,
+  });
+
+  await upsertUser({
     email: "client@acme.test",
     name: "Dana Okafor",
     role: "client",
@@ -106,7 +113,9 @@ const main = async () => {
     organizationId: null,
   });
 
-  console.log(`\nSeed complete. Sign in with either account, password: ${PASSWORD}`);
+  console.log(
+    `\nSeed complete. New accounts use ${PASSWORD}; existing accounts keep their password.`,
+  );
 };
 
 await main();

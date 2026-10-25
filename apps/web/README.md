@@ -9,11 +9,14 @@ Both send `credentials: "include"`, so the session cookie travels with every
 request. `authClient` uses `inferAdditionalFields<Auth>()` so the session type
 knows about the `role` and `organizationId` the API adds to the user.
 
-`src/App.tsx` renders by role, with no router library:
+`src/App.tsx` defines a TanStack Router tree. The home route renders a dashboard
+by role:
 
-- `client` gets the intake form. The product dropdown comes from
-  `product.listForOrg`, which is already scoped to that client's org.
-- `technician` and `admin` get the ticket queue, with a status dropdown per row.
+- `client` sees its own tickets and the intake form. The product dropdown comes
+  from `product.listForOrg`, which is already scoped to that client's org.
+- `technician` sees the shared queue and the tickets assigned to them.
+- `admin` sees ticket stats, all tickets, and the client, technician, and
+  product admin pages.
 
 Copy `.env.example` to `.env.local` and point `VITE_API_URL` at your Worker,
 then:
@@ -24,11 +27,13 @@ pnpm dev
 
 ## Demo accounts
 
-Seeded by `pnpm --filter api db:seed`, both with password `demo-password-123`:
+Seeded by `pnpm --filter api db:seed`. A new account gets the password
+`demo-password-123`; an existing account keeps its own password.
 
+- `admin@reliable.test` manages companies, products, and staff accounts.
 - `client@acme.test` files a ticket.
 - `tech@reliable.test` works the queue.
 
-Sign in as the client, file a ticket, then sign in as the technician in a
-separate browser profile or private window. The queue is not live-updating, so
-press Refresh to pull the new ticket in.
+Sign in as the client and file a ticket, then sign in as the technician or admin
+in a separate browser profile or private window. Tickets poll every 5 seconds,
+so the new ticket appears without a refresh.
