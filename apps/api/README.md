@@ -30,16 +30,19 @@ For a committed migration, use `pnpm db:generate`, then apply it with `pnpm db:m
 
 ## Seed data
 
-`pnpm db:seed` creates one client org, two products linked to it, and two users:
+`pnpm db:seed` creates one client org, two products linked to it, and three users:
 
-| Email                | Role         | Organization        |
-| -------------------- | ------------ | ------------------- |
-| `client@acme.test`   | `client`     | Acme Manufacturing  |
-| `tech@reliable.test` | `technician` | none (vendor staff) |
+| Email                 | Role         | Organization        |
+| --------------------- | ------------ | ------------------- |
+| `admin@reliable.test` | `admin`      | none (vendor staff) |
+| `client@acme.test`    | `client`     | Acme Manufacturing  |
+| `tech@reliable.test`  | `technician` | none (vendor staff) |
 
-Both use the password `demo-password-123`. The script signs users up through
-Better Auth, then writes the role and organization that Better Auth treats as
-server-owned. It is idempotent, so re-running it tops up rather than duplicating.
+A newly created account gets the password `demo-password-123`. The script signs
+users up through Better Auth, then writes the role and organization that Better
+Auth treats as server-owned. It is idempotent, so re-running it tops up rather
+than duplicating, and it never resets the password of an account that already
+exists.
 
 ## Endpoints
 
