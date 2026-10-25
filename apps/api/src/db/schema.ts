@@ -96,6 +96,18 @@ export const ticket = pgTable("ticket", {
   assignedTo: text("assigned_to").references(() => user.id, {
     onDelete: "set null",
   }),
+  /**
+   * Account that filed the ticket, so notifications can reach the reporter.
+   * Set-null keeps the ticket when the account is deleted.
+   */
+  createdBy: text("created_by").references(() => user.id, {
+    onDelete: "set null",
+  }),
+  /**
+   * Last reminder email sent for this ticket. The daily cron skips tickets
+   * reminded within the cooldown window, so stale tickets do not spam.
+   */
+  lastReminderAt: timestamp("last_reminder_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

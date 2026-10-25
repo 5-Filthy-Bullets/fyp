@@ -43,6 +43,13 @@
       "when": 1792846230291,
       "tag": "0005_supreme_selene",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792947730932,
+      "tag": "0006_common_ezekiel",
+      "breakpoints": true
     }
   ]
 }

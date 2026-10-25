@@ -168,6 +168,7 @@ export const ticketColumns = [
   "productId",
   "productName",
   "assignedTo",
+  "createdBy",
   "createdAt",
 ] as const;
 
@@ -189,6 +190,7 @@ export const ticketRow = (
     productId: "prod-line-9",
     productName: "Line 9 Controller",
     assignedTo: null,
+    createdBy: "test-user-id",
     createdAt: new Date("2026-03-04T09:15:00Z"),
     ...overrides,
   };
