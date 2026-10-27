@@ -13,6 +13,22 @@ WEB_URL=http://localhost:5173
 
 Use a local `.dev.vars` file for development. Set the same values as Wrangler secrets or variables when deploying.
 
+Ticket notifications go through the SendGrid v3 API (plain HTTPS, since
+Workers cannot open SMTP connections). No owned domain is needed: verify one
+Gmail address under SendGrid's Single Sender Verification, then set it as the
+sender. Without both values the app runs fine and skips mail delivery, which
+is what local dev and tests do.
+
+```sh
+SENDGRID_API_KEY=SG.your-key-here # wrangler secret in production
+EMAIL_FROM=youremail@gmail.com
+```
+
+A daily cron (`triggers.crons` in `wrangler.jsonc`, `0 9 * * *`) runs the
+`scheduled` handler in `src/index.ts`: unassigned open tickets older than a
+day and quiet in-progress tickets older than three days get one reminder per
+24-hour cooldown window, stamped on `ticket.last_reminder_at`.
+
 Install dependencies and start the Worker:
 
 ```sh

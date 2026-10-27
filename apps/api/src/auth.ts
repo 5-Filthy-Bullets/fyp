@@ -15,6 +15,10 @@ export interface AuthEnv {
   readonly UPLOADTHING_TOKEN: string;
   /** Set to "development" locally so UploadThing hits its dev ingest. */
   readonly ENVIRONMENT?: string;
+  /** SendGrid API key. Missing means mail sends are skipped silently. */
+  readonly SENDGRID_API_KEY?: string;
+  /** Verified sender, e.g. the Gmail address from Single Sender Verification. */
+  readonly EMAIL_FROM?: string;
 }
 
 export const createAuth = (env: AuthEnv) => {

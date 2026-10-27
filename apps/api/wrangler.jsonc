@@ -11,6 +11,12 @@
     "BETTER_AUTH_URL": "https://fyp-api.razobeckett.workers.dev",
     "WEB_URL": "https://fyp-web.pages.dev"
   },
+  // Daily ticket reminders (unassigned + stale). Pair with the `scheduled`
+  // handler in src/index.ts. Mail itself needs SENDGRID_API_KEY (secret) and
+  // EMAIL_FROM (a Single Sender verified address) to actually deliver.
+  "triggers": {
+    "crons": ["0 9 * * *"]
+  },
   // "kv_namespaces": [
   //   {
   //     "binding": "MY_KV_NAMESPACE",

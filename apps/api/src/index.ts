@@ -9,6 +9,8 @@ import { OpenAPIReferencePlugin } from "@orpc/openapi/plugins";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { createAuth, type AuthEnv } from "./auth";
 import { createDatabase } from "./db/client";
+import { runTicketReminders } from "./email/reminders";
+import { createEmailSender } from "./email/sendgrid";
 import { router } from "./router";
 import { uploadRouter } from "./uploadthing";
 
@@ -27,6 +29,8 @@ const buildContext = (env: AuthEnv, headers: Headers) => ({
   headers,
   auth: createAuth(env),
   db: createDatabase(env.DATABASE_URL),
+  email: createEmailSender(env),
+  webUrl: env.WEB_URL,
 });
 
 const rpcHandler = new RPCHandler(router);
@@ -128,4 +132,37 @@ app.all("/*", async (c) => {
   return c.text("Not found", 404);
 });
 
-export default app;
+/** Minimal shape of the runtime cron event. Only the fire time is used. */
+interface CronEvent {
+  readonly scheduledTime: number;
+}
+
+/** Smallest lifetime surface the cron run needs from the runtime. */
+interface CronContext {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
+/**
+ * Daily reminders: unassigned open tickets and quiet in-progress ones get
+ * one nudge per cooldown window. Runs off the `triggers.crons` entry in
+ * wrangler.jsonc; a failed run only logs, it never throws into the runtime.
+ */
+const scheduled = async (event: CronEvent, env: AuthEnv, ctx: CronContext): Promise<void> => {
+  const run = (async () => {
+    const db = createDatabase(env.DATABASE_URL);
+    await runTicketReminders(
+      db,
+      createEmailSender(env),
+      env.WEB_URL,
+      new Date(event.scheduledTime),
+    );
+  })();
+
+  ctx.waitUntil(run);
+  await run;
+};
+
+export default {
+  fetch: app.fetch,
+  scheduled,
+};
