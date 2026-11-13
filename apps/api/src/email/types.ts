@@ -20,13 +20,13 @@ type EmailReason = "transport" | "rejected";
 /** Tagged error for failed sends. Carries no recipient addresses. */
 export class EmailError extends Error {
   readonly _tag = "EmailError" as const;
+  readonly reason: EmailReason;
+  override readonly cause?: unknown;
 
-  constructor(
-    readonly reason: EmailReason,
-    detail: string,
-    override readonly cause?: unknown,
-  ) {
+  constructor(reason: EmailReason, detail: string, cause?: unknown) {
     super(detail);
+    this.reason = reason;
+    this.cause = cause;
   }
 }
 

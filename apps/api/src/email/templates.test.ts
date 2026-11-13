@@ -4,9 +4,11 @@ import {
   escalatedTemplate,
   newReplyTemplate,
   newTicketTemplate,
+  passwordResetTemplate,
   reminderTemplate,
   statusChangedTemplate,
   ticketUrl,
+  verificationTemplate,
 } from "./templates";
 
 const ticket = {
@@ -80,5 +82,47 @@ describe("ticket mail templates", () => {
     expect(unassigned.text).toContain("unassigned");
     expect(stale.text).toContain("in progress");
     expect(unassigned.subject).not.toBe(stale.text);
+  });
+});
+
+describe("auth mail templates", () => {
+  it("puts the reset link behind a labelled button, not just plain text", () => {
+    const url = "https://fyp-api.workers.dev/api/auth/reset-password/token-123?callbackURL=x";
+    const body = passwordResetTemplate({
+      name: "Dana Okafor",
+      email: "dana@acme.test",
+      url,
+    });
+
+    expect(body.subject).toBe("Reset your password");
+    expect(body.html).toContain(url);
+    expect(body.html).toContain("Reset password");
+    expect(body.text).toContain(url);
+    expect(body.text).toContain("Dana Okafor");
+  });
+
+  it("names the address that gets verified", () => {
+    const url = "https://fyp-api.workers.dev/api/auth/verify-email?token=abc";
+    const body = verificationTemplate({
+      name: "Dana Okafor",
+      email: "dana@acme.test",
+      url,
+    });
+
+    expect(body.subject).toBe("Verify your email");
+    expect(body.html).toContain("dana@acme.test");
+    expect(body.html).toContain("Verify email");
+    expect(body.text).toContain(url);
+  });
+
+  it("escapes a display name before putting it in the html body", () => {
+    const body = verificationTemplate({
+      name: "<script>alert(1)</script>",
+      email: "dana@acme.test",
+      url: "https://fyp-api.workers.dev/api/auth/verify-email?token=abc",
+    });
+
+    expect(body.html).not.toContain("<script>");
+    expect(body.html).toContain("&lt;script&gt;");
   });
 });

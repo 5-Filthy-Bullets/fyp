@@ -4,6 +4,8 @@ import { eq } from "drizzle-orm";
 import { APIError, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { authSchema, organization, user } from "./db/schema";
+import { createEmailSender } from "./email/sendgrid";
+import { passwordResetTemplate, verificationTemplate } from "./email/templates";
 
 export interface AuthEnv {
   readonly DATABASE_URL: string;
@@ -21,9 +23,19 @@ export interface AuthEnv {
   readonly EMAIL_FROM?: string;
 }
 
-export const createAuth = (env: AuthEnv) => {
+export interface AuthOptions {
+  /**
+   * Defers the auth mail sends to the runtime's background hook. Workers'
+   * `ctx.waitUntil` keeps the send alive after the response without making the
+   * caller wait, which also avoids leaking account existence through timing.
+   */
+  readonly waitUntil?: (promise: Promise<unknown>) => void;
+}
+
+export const createAuth = (env: AuthEnv, options?: AuthOptions) => {
   const sql = neon(env.DATABASE_URL);
   const db = drizzle(sql, { schema: authSchema });
+  const email = createEmailSender(env);
 
   /**
    * Session cookies must travel cross-site in prod (API on workers.dev,
@@ -72,12 +84,38 @@ export const createAuth = (env: AuthEnv) => {
     },
     advanced: {
       defaultCookieAttributes: cookieAttributes,
+      ...(options?.waitUntil === undefined
+        ? {}
+        : { backgroundTasks: { handler: options.waitUntil } }),
     },
     logger: {
       level: env.BETTER_AUTH_LOG_LVL ?? "error",
     },
     emailAndPassword: {
       enabled: true,
+      /**
+       * The reset link lands on the web app's /reset-password page, which posts
+       * the token back with the new password. Reset also drops every other
+       * session, so a stolen session cannot outlive the password change.
+       */
+      resetPasswordTokenExpiresIn: 60 * 60,
+      revokeSessionsOnPasswordReset: true,
+      sendResetPassword: async ({ user, url }) => {
+        const body = passwordResetTemplate({ name: user.name, email: user.email, url });
+        await email.send({ to: [user.email], ...body });
+      },
+    },
+    emailVerification: {
+      /**
+       * Admin-created accounts carry a password handed over outside the app,
+       * so sign-in stays open without a verified address. The address is still
+       * verified on first sign-up, and the link redirects back to the web app.
+       */
+      sendOnSignUp: true,
+      sendVerificationEmail: async ({ user, url }) => {
+        const body = verificationTemplate({ name: user.name, email: user.email, url });
+        await email.send({ to: [user.email], ...body });
+      },
     },
     /**
      * Deactivation lives in two checks. The admin plugin writes `banned` and

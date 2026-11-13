@@ -16,6 +16,7 @@ const envSchema = z.object({
   BETTER_AUTH_SECRET: z.string().min(1),
   BETTER_AUTH_URL: z.string().min(1),
   WEB_URL: z.string().min(1),
+  UPLOADTHING_TOKEN: z.string().min(1),
   BETTER_AUTH_LOG_LVL: z.enum(["debug", "info", "warn", "error"]).optional(),
 });
 
@@ -60,7 +61,12 @@ const upsertUser = async (input: {
   }
 
   const created = await auth.api.signUpEmail({
-    body: { email: input.email, name: input.name, password: PASSWORD },
+    body: {
+      email: input.email,
+      name: input.name,
+      password: PASSWORD,
+      callbackURL: `${env.WEB_URL.replace(/\/+$/, "")}/login?verified=1`,
+    },
   });
 
   await db

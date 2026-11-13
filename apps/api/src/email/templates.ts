@@ -25,11 +25,19 @@ export const ticketUrl = (webUrl: string, ticketId: string): string =>
 
 const shortId = (id: string): string => id.slice(0, 8);
 
+const escapeHtml = (value: string): string =>
+  value.replace(
+    /[&<>"']/g,
+    (char) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] ?? char,
+  );
+
 const layout = (input: {
   readonly heading: string;
   readonly intro: string;
   readonly rows: ReadonlyArray<{ readonly label: string; readonly value: string }>;
   readonly ctaUrl: string;
+  readonly ctaLabel?: string;
 }): string => {
   const rows = input.rows
     .map(
@@ -45,7 +53,7 @@ const layout = (input: {
     `<p style="font-size:14px;line-height:1.5;">${input.intro}</p>` +
     `<table style="font-size:14px;border-collapse:collapse;margin:12px 0;">${rows}</table>` +
     `<a href="${input.ctaUrl}" style="display:inline-block;margin-top:8px;padding:10px 18px;` +
-    `background:#1a1a1a;color:#ffffff;text-decoration:none;border-radius:6px;font-size:14px;">Open ticket</a>` +
+    `background:#1a1a1a;color:#ffffff;text-decoration:none;border-radius:6px;font-size:14px;">${input.ctaLabel ?? "Open ticket"}</a>` +
     `</div>`
   );
 };
@@ -150,5 +158,52 @@ export const reminderTemplate = (input: {
     subject,
     html: layout({ heading: subject, intro, rows: detailRows(input.ticket), ctaUrl: url }),
     text: `${subject}\n${intro}\nClient: ${input.ticket.organizationName}\nOpen: ${url}`,
+  };
+};
+
+export interface AuthMail {
+  readonly name: string;
+  readonly email: string;
+  /** Full URL from Better Auth, already carrying the single-use token. */
+  readonly url: string;
+}
+
+export const passwordResetTemplate = (input: AuthMail): TemplateBody => {
+  const subject = "Reset your password";
+  const intro =
+    `Hi ${escapeHtml(input.name)}, use the button below to set a new password. ` +
+    `The link expires in one hour. If you did not ask for this, ignore this email and your password stays the same.`;
+  return {
+    subject,
+    html: layout({
+      heading: subject,
+      intro,
+      rows: [{ label: "Account", value: escapeHtml(input.email) }],
+      ctaUrl: input.url,
+      ctaLabel: "Reset password",
+    }),
+    text:
+      `Hi ${input.name},\n\nUse this link to set a new password. It expires in one hour.\n` +
+      `${input.url}\n\nIf you did not ask for this, ignore this email.`,
+  };
+};
+
+export const verificationTemplate = (input: AuthMail): TemplateBody => {
+  const subject = "Verify your email";
+  const intro =
+    `Hi ${escapeHtml(input.name)}, confirm ${escapeHtml(input.email)} so we can reach you ` +
+    `about your support tickets. The link expires in one hour.`;
+  return {
+    subject,
+    html: layout({
+      heading: subject,
+      intro,
+      rows: [{ label: "Account", value: escapeHtml(input.email) }],
+      ctaUrl: input.url,
+      ctaLabel: "Verify email",
+    }),
+    text:
+      `Hi ${input.name},\n\nConfirm ${input.email} by opening this link. It expires in one hour.\n` +
+      `${input.url}`,
   };
 };

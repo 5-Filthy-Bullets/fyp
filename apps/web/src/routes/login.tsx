@@ -1,3 +1,4 @@
+import { Link, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { z } from "zod";
@@ -44,6 +45,7 @@ export function LoginPage() {
 }
 
 function LoginForm() {
+  const { verified } = useSearch({ from: "/login" });
   const [form, setForm] = useState<LoginInput>(initialForm);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -100,6 +102,11 @@ function LoginForm() {
           <CardDescription>Reliable Solutions support. Use your assigned account.</CardDescription>
         </CardHeader>
         <CardPanel>
+          {verified === "1" && (
+            <Badge variant="success" className="mb-4 justify-start whitespace-normal" role="status">
+              Email verified. Sign in to continue.
+            </Badge>
+          )}
           <form className="grid gap-4" noValidate onSubmit={signIn}>
             <div className="grid gap-1.5">
               <Label htmlFor="email">Email</Label>
@@ -136,6 +143,9 @@ function LoginForm() {
                 </p>
               )}
             </div>
+            <Link to="/forgot-password" className="text-sm underline-offset-4 hover:underline">
+              Forgot password?
+            </Link>
             {submitError !== null && (
               <Badge variant="error" className="justify-start whitespace-normal" role="alert">
                 {submitError}
