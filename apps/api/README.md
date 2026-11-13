@@ -13,16 +13,23 @@ WEB_URL=http://localhost:5173
 
 Use a local `.dev.vars` file for development. Set the same values as Wrangler secrets or variables when deploying.
 
-Ticket notifications go through the SendGrid v3 API (plain HTTPS, since
-Workers cannot open SMTP connections). No owned domain is needed: verify one
-Gmail address under SendGrid's Single Sender Verification, then set it as the
-sender. Without both values the app runs fine and skips mail delivery, which
-is what local dev and tests do.
+Ticket notifications, password reset links, and email verification links go
+through the SendGrid v3 API (plain HTTPS, since Workers cannot open SMTP
+connections). No owned domain is needed: verify one Gmail address under
+SendGrid's Single Sender Verification, then set it as the sender. Without both
+values the app runs fine and skips mail delivery, which is what local dev and
+tests do.
 
 ```sh
 SENDGRID_API_KEY=SG.your-key-here # wrangler secret in production
 EMAIL_FROM=youremail@gmail.com
 ```
+
+Password reset requests go to `/forgot-password` in the web app. The mailed link
+lands on `/reset-password?token=...`, and the web app posts the token back with
+the new password. New accounts get a verification link on sign-up, which
+redirects to `/login?verified=1` once the token checks out. Neither flow blocks
+sign-in, because admins still hand over the first password outside the app.
 
 A daily cron (`triggers.crons` in `wrangler.jsonc`, `0 9 * * *`) runs the
 `scheduled` handler in `src/index.ts`: unassigned open tickets older than a

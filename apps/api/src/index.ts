@@ -25,9 +25,13 @@ const app = new Hono<Env>();
  * client are built per request: neither holds connection state, and building
  * them at module scope would read env bindings before Workers binds them.
  */
-const buildContext = (env: AuthEnv, headers: Headers) => ({
+const buildContext = (
+  env: AuthEnv,
+  headers: Headers,
+  waitUntil: (promise: Promise<unknown>) => void,
+) => ({
   headers,
-  auth: createAuth(env),
+  auth: createAuth(env, { waitUntil }),
   db: createDatabase(env.DATABASE_URL),
   email: createEmailSender(env),
   webUrl: env.WEB_URL,
@@ -61,7 +65,10 @@ app.use("/api/auth/*", async (c, next) => {
   })(c, next);
 });
 
-app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
+app.all("/api/auth/*", (c) => {
+  const waitUntil = (promise: Promise<unknown>) => c.executionCtx.waitUntil(promise);
+  return createAuth(c.env, { waitUntil }).handler(c.req.raw);
+});
 
 app.use("/rpc/*", async (c, next) => {
   return cors({
@@ -73,7 +80,7 @@ app.use("/rpc/*", async (c, next) => {
 app.all("/rpc/*", async (c) => {
   const { matched, response } = await rpcHandler.handle(c.req.raw, {
     prefix: "/rpc",
-    context: buildContext(c.env, c.req.raw.headers),
+    context: buildContext(c.env, c.req.raw.headers, (promise) => c.executionCtx.waitUntil(promise)),
   });
 
   if (matched) {
@@ -122,7 +129,7 @@ app.get("/", (c) => c.text("API is running"));
 app.all("/*", async (c) => {
   const { matched, response } = await openapiHandler.handle(c.req.raw, {
     prefix: "/",
-    context: buildContext(c.env, c.req.raw.headers),
+    context: buildContext(c.env, c.req.raw.headers, (promise) => c.executionCtx.waitUntil(promise)),
   });
 
   if (matched) {

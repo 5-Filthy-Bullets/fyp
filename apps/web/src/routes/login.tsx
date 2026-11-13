@@ -1,3 +1,4 @@
+import { Link, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { z } from "zod";
@@ -13,6 +14,8 @@ const loginSchema = z.object({
   email: z.email("Enter a valid email address."),
   password: z.string().min(1, "Enter your password."),
 });
+
+const emailSchema = z.email("Enter a valid email address.");
 
 type LoginInput = z.infer<typeof loginSchema>;
 
@@ -44,13 +47,48 @@ export function LoginPage() {
 }
 
 function LoginForm() {
+  const { verified } = useSearch({ from: "/login" });
   const [form, setForm] = useState<LoginInput>(initialForm);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [resendState, setResendState] = useState<"idle" | "pending" | "sent">("idle");
+  const [resendError, setResendError] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
 
   const setField = (field: keyof LoginInput, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const resendVerification = async () => {
+    const parsed = emailSchema.safeParse(form.email.trim());
+    if (!parsed.success) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        email: parsed.error.issues[0]?.message ?? "Enter a valid email address.",
+      }));
+      setResendError(null);
+      return;
+    }
+
+    setFieldErrors((prev) => ({ ...prev, email: undefined }));
+    setResendError(null);
+    setResendState("pending");
+    try {
+      const result = await authClient.sendVerificationEmail({
+        email: parsed.data,
+        callbackURL: `${window.location.origin}/login?verified=1`,
+      });
+      if (result.error !== null) {
+        setResendError(result.error.message ?? "The verification email could not be sent.");
+        setResendState("idle");
+        return;
+      }
+      setResendState("sent");
+    } catch (caught) {
+      console.error("Verification email request failed.", caught);
+      setResendError("The request failed. Check your connection and try again.");
+      setResendState("idle");
+    }
   };
 
   const signIn = async (event: FormEvent<HTMLFormElement>) => {
@@ -100,6 +138,11 @@ function LoginForm() {
           <CardDescription>Reliable Solutions support. Use your assigned account.</CardDescription>
         </CardHeader>
         <CardPanel>
+          {verified === "1" && (
+            <Badge variant="success" className="mb-4 justify-start whitespace-normal" role="status">
+              Email verified. Sign in to continue.
+            </Badge>
+          )}
           <form className="grid gap-4" noValidate onSubmit={signIn}>
             <div className="grid gap-1.5">
               <Label htmlFor="email">Email</Label>
@@ -136,6 +179,31 @@ function LoginForm() {
                 </p>
               )}
             </div>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <Link to="/forgot-password" className="text-sm underline-offset-4 hover:underline">
+                Forgot password?
+              </Link>
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="h-auto px-0 py-0 text-sm lg:h-auto"
+                loading={resendState === "pending"}
+                onClick={resendVerification}
+              >
+                Resend verification email
+              </Button>
+            </div>
+            {resendState === "sent" && (
+              <Badge variant="success" className="justify-start whitespace-normal" role="status">
+                Verification email sent. Check your inbox.
+              </Badge>
+            )}
+            {resendError !== null && (
+              <Badge variant="error" className="justify-start whitespace-normal" role="alert">
+                {resendError}
+              </Badge>
+            )}
             {submitError !== null && (
               <Badge variant="error" className="justify-start whitespace-normal" role="alert">
                 {submitError}

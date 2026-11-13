@@ -4,6 +4,8 @@ import { AdminProductsPage } from "./routes/admin-products";
 import { AdminTechniciansPage } from "./routes/admin-technicians";
 import { HomePage } from "./routes/home";
 import { LoginPage } from "./routes/login";
+import { ForgotPasswordPage } from "./routes/forgot-password";
+import { ResetPasswordPage } from "./routes/reset-password";
 import { TicketDetailPage } from "./routes/ticket-detail";
 import { NewTicketPage } from "./routes/tickets-new";
 import { TicketsPage } from "./routes/tickets";
@@ -21,6 +23,25 @@ const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
   component: LoginPage,
+  validateSearch: (search: Record<string, unknown>): { verified?: string } => ({
+    verified: typeof search.verified === "string" ? search.verified : undefined,
+  }),
+});
+
+const forgotPasswordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/forgot-password",
+  component: ForgotPasswordPage,
+});
+
+const resetPasswordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/reset-password",
+  component: ResetPasswordPage,
+  validateSearch: (search: Record<string, unknown>): { token?: string; error?: string } => ({
+    token: typeof search.token === "string" ? search.token : undefined,
+    error: typeof search.error === "string" ? search.error : undefined,
+  }),
 });
 
 const ticketsRoute = createRoute({
@@ -68,6 +89,8 @@ const adminProductsRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
+  forgotPasswordRoute,
+  resetPasswordRoute,
   ticketsRoute,
   newTicketRoute,
   ticketDetailRoute,

@@ -49,7 +49,12 @@ export interface SessionReader {
   readonly api: {
     readonly getSession: (input: { readonly headers: Headers }) => Promise<RouterSession | null>;
     readonly signUpEmail: (input: {
-      readonly body: { readonly email: string; readonly name: string; readonly password: string };
+      readonly body: {
+        readonly email: string;
+        readonly name: string;
+        readonly password: string;
+        readonly callbackURL?: string;
+      };
     }) => Promise<SignUpResult>;
   };
 }
@@ -310,10 +315,17 @@ const insertCredentialUser = async (
     readonly password: string;
     readonly role: "technician" | "client";
     readonly organizationId: string | null;
+    /** Where the verification link lands after the token is checked. */
+    readonly callbackURL?: string;
   },
 ): Promise<string> => {
   const created = await auth.api.signUpEmail({
-    body: { email: input.email, name: input.name, password: input.password },
+    body: {
+      email: input.email,
+      name: input.name,
+      password: input.password,
+      ...(input.callbackURL === undefined ? {} : { callbackURL: input.callbackURL }),
+    },
   });
   const id = created.user.id;
 
@@ -1120,6 +1132,16 @@ type TicketJoin = {
 /** Web origin for ticket links in mail. Empty when the caller did not provide one. */
 const webUrlOf = (context: RpcContext): string => context.webUrl ?? "";
 
+/**
+ * Where a clicked verification link lands. Better Auth checks the token first
+ * and then redirects here, so the web app can tell the user the address is
+ * confirmed. Without it the redirect defaults to the API root.
+ */
+const verificationCallbackUrl = (context: RpcContext): string | undefined => {
+  const webUrl = context.webUrl?.replace(/\/+$/, "") ?? "";
+  return webUrl === "" ? undefined : `${webUrl}/login?verified=1`;
+};
+
 /** One-line preview for reply mail. Attachment-only replies name the file. */
 const replyExcerpt = (content: string, attachmentName: string | null): string => {
   const trimmed = content.trim();
@@ -1297,12 +1319,14 @@ export const adminUserRouter = {
 
       let id: string;
       try {
+        const callbackURL = verificationCallbackUrl(context);
         id = await insertCredentialUser(context.db, context.auth, {
           name: input.name,
           email: input.email,
           password: input.password,
           role: "technician",
           organizationId: null,
+          ...(callbackURL === undefined ? {} : { callbackURL }),
         });
       } catch (error) {
         throw toAdminError(error, "The technician could not be created.");
@@ -1409,12 +1433,14 @@ export const adminUserRouter = {
       // duplicate conflict.
       let userId: string | null = null;
       try {
+        const callbackURL = verificationCallbackUrl(context);
         userId = await insertCredentialUser(context.db, context.auth, {
           name: input.name,
           email: input.email,
           password: input.password,
           role: "client",
           organizationId: orgId,
+          ...(callbackURL === undefined ? {} : { callbackURL }),
         });
 
         for (const productId of input.productIds) {

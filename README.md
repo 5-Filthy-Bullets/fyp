@@ -109,6 +109,8 @@ API (`apps/api/.dev.vars` locally, Worker secrets in production):
 | `UPLOADTHING_TOKEN` | UploadThing application token |
 | `ENVIRONMENT` | Set to `development` locally so uploads use the UploadThing dev ingest |
 | `BETTER_AUTH_LOG_LVL` | Optional log level, defaults to `error` |
+| `SENDGRID_API_KEY` | SendGrid key for ticket, password reset, and verification mail. Omit to skip sending |
+| `EMAIL_FROM` | Verified SendGrid sender address. Omit to skip sending |
 
 Web (`apps/web/.env.local`):
 
@@ -209,6 +211,8 @@ cd apps/api
 pnpm wrangler secret put DATABASE_URL
 pnpm wrangler secret put BETTER_AUTH_SECRET
 pnpm wrangler secret put UPLOADTHING_TOKEN
+pnpm wrangler secret put SENDGRID_API_KEY
+pnpm wrangler secret put EMAIL_FROM
 ```
 
 Apply migrations to the production database before deploying a schema change, then deploy. Pass the production `DATABASE_URL` explicitly, since `apps/api/.dev.vars` points at your local database:
@@ -228,7 +232,7 @@ When it runs over HTTPS on two domains, the session cookie needs `SameSite=None`
 
 ## Not built yet
 
-Password reset and email verification have no delivery set up. Admins create technician and client accounts with an initial password handed over outside the app, so there is no invite email. Status transitions have no rules, so any status can move to any other. There is no audit log beyond the ticket message thread.
+Admins create technician and client accounts with an initial password handed over outside the app, so there is no invite email. Sign-in does not require a verified address, but every new account still gets a verification link. Status transitions have no rules, so any status can move to any other. There is no audit log beyond the ticket message thread.
 
 ## License
 
