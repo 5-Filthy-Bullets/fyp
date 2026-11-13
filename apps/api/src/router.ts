@@ -175,6 +175,7 @@ const userOutput = z.object({
   id: z.string().describe("User id"),
   name: z.string().describe("Display name"),
   email: z.string().describe("Sign-in email"),
+  emailVerified: z.boolean().describe("True once the address has been confirmed"),
   role: z.enum(userRole.enumValues).describe("Account role"),
   organizationId: z.string().nullable().describe("Client org id, null for vendor staff"),
   organizationName: z.string().nullable().describe("Client org name, null for vendor staff"),
@@ -214,6 +215,7 @@ type UserJoin = {
   readonly id: string;
   readonly name: string;
   readonly email: string;
+  readonly emailVerified: boolean;
   readonly role: (typeof userRole.enumValues)[number];
   readonly organizationId: string | null;
   readonly organizationName: string | null;
@@ -228,6 +230,7 @@ const selectUserById = async (db: Database, userId: string): Promise<UserJoin | 
       id: user.id,
       name: user.name,
       email: user.email,
+      emailVerified: user.emailVerified,
       role: user.role,
       organizationId: user.organizationId,
       organizationName: organization.name,
@@ -245,6 +248,7 @@ const toUserOutput = (row: UserJoin) => ({
   id: row.id,
   name: row.name,
   email: row.email,
+  emailVerified: row.emailVerified,
   role: row.role,
   organizationId: row.organizationId,
   organizationName: row.organizationName,
@@ -270,6 +274,7 @@ const selectUsers = async (
       id: user.id,
       name: user.name,
       email: user.email,
+      emailVerified: user.emailVerified,
       role: user.role,
       organizationId: user.organizationId,
       organizationName: organization.name,

@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import { z } from "zod";
 import { AdminGuard } from "@/components/admin-guard";
 import { PageHeader } from "@/components/page-header";
+import { ResendVerificationButton } from "@/components/resend-verification";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardPanel, CardTitle } from "@/components/ui/card";
@@ -410,7 +411,18 @@ function TechRow({ tech }: { readonly tech: AdminUser }) {
               <span className="truncate">{tech.name}</span>
               {tech.banned && <Badge variant="error">Deactivated</Badge>}
             </p>
-            <p className="truncate text-xs text-muted-foreground">{tech.email}</p>
+            <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span className="truncate">{tech.email}</span>
+              {tech.emailVerified ? (
+                <Badge variant="success" size="sm">
+                  Verified
+                </Badge>
+              ) : (
+                <Badge variant="warning" size="sm">
+                  Unverified
+                </Badge>
+              )}
+            </p>
             {error !== null && (
               <p className="mt-1 text-sm text-destructive" role="alert">
                 {error}
@@ -431,6 +443,7 @@ function TechRow({ tech }: { readonly tech: AdminUser }) {
           >
             {tech.banned ? "Reactivate" : "Deactivate"}
           </Button>
+          {!tech.emailVerified && <ResendVerificationButton email={tech.email} />}
         </div>
       )}
     </li>

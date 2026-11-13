@@ -4,15 +4,22 @@ import type { FormEvent } from "react";
 import { z } from "zod";
 import { AdminGuard } from "@/components/admin-guard";
 import { PageHeader } from "@/components/page-header";
+import { ResendVerificationButton } from "@/components/resend-verification";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardPanel, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
-import { useAdminOrgs, useCreateClient, useSetOrgActive, useUpdateAdminOrg } from "@/lib/admin";
-import type { AdminOrg } from "@/lib/admin";
-import { useAdminProducts } from "@/lib/admin";
+import {
+  useAdminOrgs,
+  useAdminProducts,
+  useAdminUsers,
+  useCreateClient,
+  useSetOrgActive,
+  useUpdateAdminOrg,
+} from "@/lib/admin";
+import type { AdminOrg, AdminUser } from "@/lib/admin";
 
 const PAGE_SIZE = 20;
 
@@ -51,6 +58,7 @@ export function AdminClientsPage() {
         />
         <CreateClientCard />
         <ClientsList />
+        <ClientUsersList />
       </div>
     </AdminGuard>
   );
@@ -487,6 +495,138 @@ function OrgRow({ org }: { readonly org: AdminOrg }) {
           >
             {org.isActive ? "Suspend" : "Reactivate"}
           </Button>
+        </div>
+      )}
+    </li>
+  );
+}
+
+/**
+ * Every client login across companies, so admins can resend a verification
+ * link without opening each company row. Directory rows carry the org name.
+ */
+function ClientUsersList() {
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const query = useAdminUsers({
+    role: "client",
+    search,
+    limit: PAGE_SIZE,
+    offset: page * PAGE_SIZE,
+  });
+  const users = query.data?.users ?? [];
+  const total = query.data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Client users</CardTitle>
+        <CardDescription>
+          {total === 0 ? "No client users yet." : `${total} ${total === 1 ? "user" : "users"}.`}
+        </CardDescription>
+      </CardHeader>
+      <CardPanel className="grid gap-4">
+        <div className="grid gap-1.5">
+          <Label htmlFor="client-user-search">Search users</Label>
+          <Input
+            id="client-user-search"
+            type="search"
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(0);
+            }}
+            placeholder="Search name or email…"
+          />
+        </div>
+        {query.isPending ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+            <Spinner className="size-4" aria-hidden /> Loading client users…
+          </p>
+        ) : query.isError ? (
+          <div className="grid gap-3">
+            <p className="text-sm text-destructive" role="alert">
+              Could not load client users. Check your connection and try again.
+            </p>
+            <div>
+              <Button variant="outline" size="sm" onClick={() => void query.refetch()}>
+                Try again
+              </Button>
+            </div>
+          </div>
+        ) : users.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {total === 0
+              ? "Client users appear here after a company is created."
+              : "No client users match this search."}
+          </p>
+        ) : (
+          <ul className="divide-y rounded-lg border">
+            {users.map((user) => (
+              <ClientUserRow key={user.id} user={user} />
+            ))}
+          </ul>
+        )}
+        {pageCount > 1 && (
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-muted-foreground tabular-nums" aria-live="polite">
+              Page {page + 1} of {pageCount} · {total} client users
+            </p>
+            <div className="grid grid-cols-2 gap-2 sm:flex">
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-h-11 lg:min-h-0"
+                disabled={page <= 0}
+                onClick={() => setPage(page - 1)}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-h-11 lg:min-h-0"
+                disabled={page + 1 >= pageCount}
+                onClick={() => setPage(page + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardPanel>
+    </Card>
+  );
+}
+
+function ClientUserRow({ user }: { readonly user: AdminUser }) {
+  return (
+    <li className="grid gap-3 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+      <div className="min-w-0">
+        <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
+          <span className="truncate">{user.name}</span>
+          {user.banned && <Badge variant="error">Deactivated</Badge>}
+        </p>
+        <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span className="truncate">{user.email}</span>
+          {user.emailVerified ? (
+            <Badge variant="success" size="sm">
+              Verified
+            </Badge>
+          ) : (
+            <Badge variant="warning" size="sm">
+              Unverified
+            </Badge>
+          )}
+        </p>
+        <p className="truncate text-xs text-muted-foreground">
+          {user.organizationName ?? "No company"}
+        </p>
+      </div>
+      {!user.emailVerified && (
+        <div className="sm:flex sm:flex-wrap">
+          <ResendVerificationButton email={user.email} />
         </div>
       )}
     </li>
