@@ -194,10 +194,23 @@ function MessageThread({ ticketId }: { readonly ticketId: string }) {
   );
 }
 
+const roleShortLabels = {
+  admin: "Admin",
+  technician: "Tech",
+  client: "Client",
+} as const satisfies Record<NonNullable<TicketMessage["authorRole"]>, string>;
+
+/** "First Last (Tech)", or just the name when the author's account is gone. */
+const authorLabel = (message: TicketMessage): string => {
+  const name = message.authorName ?? "Deleted account";
+  return message.authorRole === null ? name : `${name} (${roleShortLabels[message.authorRole]})`;
+};
+
 function MessageRow({ message }: { readonly message: TicketMessage }) {
   return (
     <li className="grid min-w-0 gap-2 px-4 py-3.5 sm:px-6">
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="text-sm font-medium break-words">{authorLabel(message)}</span>
         <span className="text-xs break-words text-muted-foreground tabular-nums">
           {formatTicketDate(message.createdAt)}
         </span>
