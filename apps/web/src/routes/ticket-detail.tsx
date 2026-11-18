@@ -1,5 +1,5 @@
 import { Link, useParams } from "@tanstack/react-router";
-import { ArrowLeft, Inbox, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Inbox, RotateCcw, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 import { z } from "zod";
@@ -34,6 +34,7 @@ import {
   useAssignTicket,
   useEscalateTicket,
   usePostTicketMessage,
+  useReopenTicket,
   useSetTicketStatus,
   useTicketDetail,
   useTicketMessages,
@@ -476,6 +477,7 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
   const detail = useTicketDetail(ticketId);
   const setStatus = useSetTicketStatus(ticketId);
   const assign = useAssignTicket(ticketId);
+  const reopen = useReopenTicket(ticketId);
   const ticket = detail.data?.ticket;
   const techsQuery = useTechnicians();
   const techs = techsQuery.data?.technicians ?? [];
@@ -484,22 +486,51 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
   const assignableTechs = techs.filter((tech) => tech.id !== ticket?.assignedTo);
 
   const isStaff = role === "technician" || role === "admin";
+  const isResolved = ticket?.status === "resolved";
   const [assigneeId, setAssigneeId] = useState("");
   const [pickerKey, setPickerKey] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  const reopenTicket = () => {
+    setActionError(null);
+    reopen.mutate(
+      { ticketId },
+      {
+        onError: (error) => {
+          setActionError(error instanceof Error ? error.message : "Could not reopen the ticket.");
+        },
+      },
+    );
+  };
 
   if (!isStaff) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>What happens next</CardTitle>
-          <CardDescription>The vendor team picks this up from the queue.</CardDescription>
+          <CardTitle>{isResolved ? "Problem came back?" : "What happens next"}</CardTitle>
+          <CardDescription>
+            {isResolved
+              ? "Reopen the ticket and the vendor team picks it up again."
+              : "The vendor team picks this up from the queue."}
+          </CardDescription>
         </CardHeader>
-        <CardPanel>
-          <p className="text-sm text-muted-foreground">
-            Reply above if you have more detail. Status, priority, and assignment are handled by
-            vendor staff.
-          </p>
+        <CardPanel className="grid gap-3">
+          {isResolved ? (
+            <Button onClick={reopenTicket} loading={reopen.isPending}>
+              <RotateCcw aria-hidden />
+              Reopen ticket
+            </Button>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Reply above if you have more detail. Status, priority, and assignment are handled by
+              vendor staff.
+            </p>
+          )}
+          {actionError !== null && (
+            <p className="text-sm text-destructive" role="alert">
+              {actionError}
+            </p>
+          )}
         </CardPanel>
       </Card>
     );
@@ -611,31 +642,37 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
             )}
           </div>
         )}
-        {ticket?.assignedTo === null ? (
+        {isResolved ? (
+          <p className="text-sm text-muted-foreground">
+            This ticket is resolved. Only the client can reopen it.
+          </p>
+        ) : ticket?.assignedTo === null ? (
           <Button onClick={claim}>Claim this ticket</Button>
         ) : (
           <p className="text-sm text-muted-foreground">
             {isMine ? "You own this ticket." : `Assigned to ${assigneeName ?? "someone"}.`}
           </p>
         )}
-        <div className="grid gap-1.5">
-          <Label htmlFor="status-select">Status</Label>
-          <select
-            id="status-select"
-            value={ticket?.status ?? "open"}
-            onChange={(event) =>
-              changeStatus(event.target.value as (typeof ticketStatuses)[number])
-            }
-            disabled={ticket === undefined}
-            className="h-11 w-full rounded-lg border border-input bg-background px-3 text-base shadow-xs/5 outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 disabled:opacity-64 lg:h-7.5 lg:text-sm dark:bg-input/32"
-          >
-            {ticketStatuses.map((value) => (
-              <option key={value} value={value}>
-                {statusLabel(value)}
-              </option>
-            ))}
-          </select>
-        </div>
+        {!isResolved && (
+          <div className="grid gap-1.5">
+            <Label htmlFor="status-select">Status</Label>
+            <select
+              id="status-select"
+              value={ticket?.status ?? "open"}
+              onChange={(event) =>
+                changeStatus(event.target.value as (typeof ticketStatuses)[number])
+              }
+              disabled={ticket === undefined}
+              className="h-11 w-full rounded-lg border border-input bg-background px-3 text-base shadow-xs/5 outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 disabled:opacity-64 lg:h-7.5 lg:text-sm dark:bg-input/32"
+            >
+              {ticketStatuses.map((value) => (
+                <option key={value} value={value}>
+                  {statusLabel(value)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="grid gap-1.5">
           <Label htmlFor="priority-select">Priority</Label>
           <select
@@ -652,67 +689,71 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
             ))}
           </select>
         </div>
-        <form className="grid gap-1.5" onSubmit={assignTo}>
-          <Label htmlFor="assignee">Assign to technician</Label>
-          {techsQuery.isPending ? (
-            <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
-              <Spinner className="size-4" aria-hidden /> Loading technicians…
-            </p>
-          ) : assignableTechs.length === 0 ? (
-            <p className="text-sm text-muted-foreground" role="status">
-              No other technicians available. The current owner is the only technician.
-            </p>
-          ) : (
-            <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-              <div className="min-w-0 flex-1">
-                <Autocomplete
-                  key={pickerKey}
-                  items={assignableTechs}
-                  filter={matchesTechnician}
-                  itemToStringValue={(tech) => tech.name}
-                  openOnInputClick
-                  onValueChange={(text) =>
-                    setAssigneeId(resolveTechnicianId(assignableTechs, text))
-                  }
-                >
-                  <AutocompleteInput
-                    id="assignee"
-                    placeholder="Search by name, email, or id…"
-                    showTrigger
-                    showClear
-                  />
-                  <AutocompletePopup>
-                    <AutocompleteEmpty>No technicians match this search.</AutocompleteEmpty>
-                    <AutocompleteList>
-                      {(tech) => (
-                        <AutocompleteItem key={tech.id} value={tech}>
-                          <span className="grid min-w-0 flex-1">
-                            <span className="truncate text-sm font-medium">{tech.name}</span>
-                            <span className="truncate text-xs text-muted-foreground">
-                              {tech.email}
+        {!isResolved && (
+          <form className="grid gap-1.5" onSubmit={assignTo}>
+            <Label htmlFor="assignee">Assign to technician</Label>
+            {techsQuery.isPending ? (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+                <Spinner className="size-4" aria-hidden /> Loading technicians…
+              </p>
+            ) : assignableTechs.length === 0 ? (
+              <p className="text-sm text-muted-foreground" role="status">
+                No other technicians available. The current owner is the only technician.
+              </p>
+            ) : (
+              <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+                <div className="min-w-0 flex-1">
+                  <Autocomplete
+                    key={pickerKey}
+                    items={assignableTechs}
+                    filter={matchesTechnician}
+                    itemToStringValue={(tech) => tech.name}
+                    openOnInputClick
+                    onValueChange={(text) =>
+                      setAssigneeId(resolveTechnicianId(assignableTechs, text))
+                    }
+                  >
+                    <AutocompleteInput
+                      id="assignee"
+                      placeholder="Search by name, email, or id…"
+                      showTrigger
+                      showClear
+                    />
+                    <AutocompletePopup>
+                      <AutocompleteEmpty>No technicians match this search.</AutocompleteEmpty>
+                      <AutocompleteList>
+                        {(tech) => (
+                          <AutocompleteItem key={tech.id} value={tech}>
+                            <span className="grid min-w-0 flex-1">
+                              <span className="truncate text-sm font-medium">{tech.name}</span>
+                              <span className="truncate text-xs text-muted-foreground">
+                                {tech.email}
+                              </span>
                             </span>
-                          </span>
-                        </AutocompleteItem>
-                      )}
-                    </AutocompleteList>
-                  </AutocompletePopup>
-                </Autocomplete>
+                          </AutocompleteItem>
+                        )}
+                      </AutocompleteList>
+                    </AutocompletePopup>
+                  </Autocomplete>
+                </div>
+                <Button
+                  type="submit"
+                  variant="outline"
+                  loading={assign.isPending}
+                  className="min-h-11 w-full shrink-0 lg:min-h-0 sm:w-auto"
+                >
+                  Assign
+                </Button>
               </div>
-              <Button
-                type="submit"
-                variant="outline"
-                loading={assign.isPending}
-                className="min-h-11 w-full shrink-0 lg:min-h-0 sm:w-auto"
-              >
-                Assign
-              </Button>
-            </div>
-          )}
-          <p className="text-xs text-muted-foreground">
-            Search by name, email, or id. Only technician accounts can own queue work.
-          </p>
-        </form>
-        {role === "technician" && !ticket?.escalated && <EscalateForm ticketId={ticketId} />}
+            )}
+            <p className="text-xs text-muted-foreground">
+              Search by name, email, or id. Only technician accounts can own queue work.
+            </p>
+          </form>
+        )}
+        {role === "technician" && !ticket?.escalated && !isResolved && (
+          <EscalateForm ticketId={ticketId} />
+        )}
         {actionError !== null && (
           <p className="text-sm text-destructive" role="alert">
             {actionError}

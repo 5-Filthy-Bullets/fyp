@@ -1,5 +1,5 @@
 import { ORPCError, os } from "@orpc/server";
-import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, ne, or, sql } from "drizzle-orm";
 import {
   notifyEscalated,
   notifyNewReply,
@@ -672,7 +672,7 @@ export const ticketRouter = {
       path: "/tickets/{ticketId}/status",
       summary: "Claim a ticket, change its status, or adjust its priority",
       description:
-        "Moves a ticket to a new status and optionally changes its priority. Claims an unassigned ticket for the caller, and leaves an existing owner alone so a second technician cannot silently steal a claimed ticket. There are no status-transition guards, so any status can move to any other.",
+        "Moves a ticket to a new status and optionally changes its priority. Claims an unassigned ticket for the caller, and leaves an existing owner alone so a second technician cannot silently steal a claimed ticket. A resolved ticket is closed to staff: only the client can reopen it, so any status move on a resolved ticket is rejected. Priority remains adjustable.",
       tags: ["Tickets"],
     })
     .input(
@@ -702,10 +702,29 @@ export const ticketRouter = {
           // status last silently take over a ticket someone else already claimed.
           assignedTo: sql`coalesce(${ticket.assignedTo}, ${context.caller.userId})`,
         })
-        .where(eq(ticket.id, input.ticketId))
+        .where(
+          and(
+            eq(ticket.id, input.ticketId),
+            // Resolved is the client's call to undo. Staff moving the status
+            // would reopen work the reporter already accepted as finished.
+            ...(input.status === undefined ? [] : [ne(ticket.status, "resolved")]),
+          ),
+        )
         .returning();
 
       if (!updated) {
+        const [existing] = await context.db
+          .select({ status: ticket.status })
+          .from(ticket)
+          .where(eq(ticket.id, input.ticketId))
+          .limit(1);
+
+        if (existing?.status === "resolved") {
+          throw new ORPCError("CONFLICT", {
+            message: "This ticket is resolved. The client has to reopen it first.",
+          });
+        }
+
         throw new ORPCError("NOT_FOUND", {
           message: "That ticket does not exist.",
         });
@@ -740,7 +759,7 @@ export const ticketRouter = {
       path: "/tickets/{ticketId}/assignee",
       summary: "Assign a ticket to a technician",
       description:
-        "Explicitly hands a ticket to a chosen technician. The assignee must be a vendor staff account with the technician role, so a client or admin account cannot end up owning queue work. Assigning claims the ticket: it moves to in progress and clears any escalation, since the admin has handled the review by routing it. Reassigning to the current owner is rejected.",
+        "Explicitly hands a ticket to a chosen technician. The assignee must be a vendor staff account with the technician role, so a client or admin account cannot end up owning queue work. Assigning claims the ticket: it moves to in progress and clears any escalation, since the admin has handled the review by routing it. Reassigning to the current owner is rejected, and a resolved ticket cannot be assigned until the client reopens it.",
       tags: ["Tickets"],
     })
     .input(
@@ -764,7 +783,7 @@ export const ticketRouter = {
       }
 
       const [current] = await context.db
-        .select({ assignedTo: ticket.assignedTo })
+        .select({ assignedTo: ticket.assignedTo, status: ticket.status })
         .from(ticket)
         .where(eq(ticket.id, input.ticketId))
         .limit(1);
@@ -772,6 +791,12 @@ export const ticketRouter = {
       if (!current) {
         throw new ORPCError("NOT_FOUND", {
           message: "That ticket does not exist.",
+        });
+      }
+
+      if (current.status === "resolved") {
+        throw new ORPCError("CONFLICT", {
+          message: "This ticket is resolved. The client has to reopen it first.",
         });
       }
 
@@ -817,6 +842,56 @@ export const ticketRouter = {
         input.assigneeId,
         assignee.name,
       );
+
+      return { ticket: toTicketOutput(changed) };
+    }),
+
+  /**
+   * The client's undo for a finished ticket. Staff are locked out of resolved
+   * tickets, so the reporter is the only one who can send it back to the queue.
+   */
+  reopen: clientProcedure
+    .route({
+      method: "PATCH",
+      path: "/tickets/{ticketId}/reopen",
+      summary: "Reopen a resolved ticket",
+      description:
+        "Sends the caller's resolved ticket back to open. Clients can reopen only tickets in their own organization, and only once the ticket is resolved. Staff cannot reopen: they are locked out of resolved tickets entirely.",
+      tags: ["Tickets"],
+    })
+    .input(z.object({ ticketId: z.string().min(1).describe("Ticket to reopen") }))
+    .output(z.object({ ticket: ticketOutput }))
+    .handler(async ({ context, input }) => {
+      const found = await loadTicketForCaller(context.db, context.caller, input.ticketId);
+
+      if (found.status !== "resolved") {
+        throw new ORPCError("CONFLICT", {
+          message: "Only a resolved ticket can be reopened.",
+        });
+      }
+
+      const [updated] = await context.db
+        .update(ticket)
+        .set({ status: "open" })
+        // The status check rides along so two stale tabs cannot both reopen
+        // and race the ticket into an unexpected state.
+        .where(and(eq(ticket.id, input.ticketId), eq(ticket.status, "resolved")))
+        .returning();
+
+      if (!updated) {
+        throw new ORPCError("CONFLICT", {
+          message: "The ticket is no longer resolved.",
+        });
+      }
+
+      const rows = await selectTickets(context.db, { ticketId: input.ticketId });
+      const changed = rows[0];
+
+      if (!changed) {
+        throw new ORPCError("INTERNAL_SERVER_ERROR", {
+          message: "The ticket was updated but could not be read back.",
+        });
+      }
 
       return { ticket: toTicketOutput(changed) };
     }),
