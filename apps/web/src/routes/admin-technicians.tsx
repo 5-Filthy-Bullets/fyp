@@ -443,7 +443,7 @@ function TechRow({ tech }: { readonly tech: AdminUser }) {
           >
             {tech.banned ? "Reactivate" : "Deactivate"}
           </Button>
-          {!tech.emailVerified && <ResendVerificationButton email={tech.email} />}
+          {!tech.emailVerified && <ResendVerificationButton userId={tech.id} />}
         </div>
       )}
     </li>

@@ -29,6 +29,7 @@ describe("openapi spec", () => {
       "/admin/users",
       "/admin/users/{userId}",
       "/admin/users/{userId}/active",
+      "/admin/users/{userId}/verification-email",
       "/hello",
       "/me",
       "/products",

@@ -56,6 +56,15 @@ export interface SessionReader {
         readonly callbackURL?: string;
       };
     }) => Promise<SignUpResult>;
+    /**
+     * Deliberately session-less: passing the caller's headers makes
+     * better-auth reject any address that is not the caller's own with
+     * "Email mismatch", which is exactly what an admin resending for someone
+     * else would hit. Omit `headers` so it takes the unauthenticated branch.
+     */
+    readonly sendVerificationEmail: (input: {
+      readonly body: { readonly email: string; readonly callbackURL?: string };
+    }) => Promise<unknown>;
   };
 }
 
@@ -1695,6 +1704,53 @@ export const adminUserRouter = {
         user: toUserOutput(changed),
         message: lifecycleMessage(input.active, "Account"),
       };
+    }),
+
+  /**
+   * Admin-created accounts arrive unverified, and the first link can go
+   * missing or expire. The admin resends it from the directory instead of
+   * asking the account holder to use the self-service route, which only
+   * accepts an address matching the caller's own session.
+   */
+  resendVerification: adminProcedure
+    .route({
+      method: "POST",
+      path: "/admin/users/{userId}/verification-email",
+      summary: "Resend an account's verification email",
+      description:
+        "Sends a fresh verification link to an account whose address is still unverified. Refuses accounts that are already verified.",
+      tags: ["Admin"],
+    })
+    .input(
+      z.object({
+        userId: z.string().min(1).describe("Account to send the verification link to"),
+      }),
+    )
+    .output(z.object({ message: z.string() }))
+    .handler(async ({ context, input }) => {
+      const target = await selectUserById(context.db, input.userId);
+      if (!target) {
+        throw new ORPCError("NOT_FOUND", { message: "That account does not exist." });
+      }
+      if (target.emailVerified) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "That email address is already verified.",
+        });
+      }
+
+      const callbackURL = verificationCallbackUrl(context);
+      try {
+        await context.auth.api.sendVerificationEmail({
+          body: {
+            email: target.email,
+            ...(callbackURL === undefined ? {} : { callbackURL }),
+          },
+        });
+      } catch (error) {
+        throw toAdminError(error, "The verification email could not be sent.");
+      }
+
+      return { message: `Verification email sent to ${target.email}.` };
     }),
 };
 

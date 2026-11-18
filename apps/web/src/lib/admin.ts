@@ -233,6 +233,10 @@ export const useUpdateAdminUser = (userId: string) => {
   );
 };
 
+/** Resends the verification link for an account that is still unverified. */
+export const useResendVerification = () =>
+  useMutation(orpcQuery.admin.user.resendVerification.mutationOptions());
+
 /** Deactivate drops live sessions; reactivate lifts the ban. Guessed up front. */
 export const useSetUserActive = (userId: string) => {
   const queryClient = useQueryClient();
