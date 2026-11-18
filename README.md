@@ -8,13 +8,13 @@ Accounts have one of three roles, and the role decides what the API returns and 
 
 | Role | Scope | Main work |
 | --- | --- | --- |
-| `client` | Own organization only | File tickets, follow replies, attach photos or video |
+| `client` | Own organization only | File tickets, follow replies, attach photos or video, reopen a resolved ticket |
 | `technician` | Every client organization | Claim tickets, set status and priority, assign, escalate, reply |
 | `admin` | Every client organization plus admin screens | Manage all tickets, companies, entitlements, technicians, and client accounts |
 
 Clients get a dashboard with ticket counts, a searchable and filterable list, an intake form limited to products their company is entitled to, and a ticket page with a message thread. A reply can carry images (4 files, 8 MB each) or one video up to 64 MB, hosted on UploadThing.
 
-Technicians get a queue, a "my work" view, and per-ticket actions: status, priority, assignee, escalation, public reply, or an internal note that clients never see. Their dashboard shows queue counts and the tickets they own. Admins get the full ticket list, an escalated-only view, and a dashboard with status counts, recent activity, and escalated tickets.
+Technicians get a queue, a "my work" view, and per-ticket actions: status, priority, assignee, escalation, public reply, or an internal note that clients never see. Their dashboard shows queue counts and the tickets they own. Admins get the full ticket list, an escalated-only view, and a dashboard with status counts, recent activity, and escalated tickets. Resolved tickets are closed to staff: no status moves and no assignment until the client reopens one.
 
 Lists poll: tickets every 5 seconds, message threads every 3 seconds. There are no websockets.
 
@@ -290,7 +290,7 @@ The main resources:
 | Session | `GET /me`, `GET /hello` |
 | Products | `GET /products` (client, scoped to its org) |
 | Tickets | `POST /tickets`, `GET /tickets/mine`, `GET /tickets`, `GET /tickets/{ticketId}` |
-| Ticket work | `PATCH /tickets/{ticketId}/status`, `PATCH /tickets/{ticketId}/assignee`, `PATCH /tickets/{ticketId}/escalation`, `GET /tickets/technicians` |
+| Ticket work | `PATCH /tickets/{ticketId}/status`, `PATCH /tickets/{ticketId}/assignee`, `PATCH /tickets/{ticketId}/escalation`, `PATCH /tickets/{ticketId}/reopen`, `GET /tickets/technicians` |
 | Messages | `GET /tickets/{ticketId}/messages`, `POST /tickets/{ticketId}/messages` |
 | Admin users | `GET /admin/users`, `POST /admin/technicians`, `POST /admin/clients`, `PATCH /admin/users/{userId}`, `PATCH /admin/users/{userId}/active` |
 | Admin companies | `GET /admin/organizations`, `GET /admin/organizations/{organizationId}`, `PATCH /admin/organizations/{organizationId}`, `PATCH /admin/organizations/{organizationId}/active`, `PUT /admin/organizations/{organizationId}/products` |

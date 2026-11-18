@@ -502,6 +502,35 @@ describe("ticket.setStatus", () => {
     expect(ticket.status).toBe("open");
   });
 
+  it("refuses to change the status of a resolved ticket", async () => {
+    const fake = fakeDatabase();
+    // The guarded update matches nothing, then the lookup explains why.
+    fake.queueRows([]);
+    fake.queueRows([["resolved"]]);
+
+    const setStatus = router.ticket.setStatus.callable({ context: staffContext(fake) });
+
+    await expect(setStatus({ ticketId: "ticket-1", status: "in_progress" })).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "This ticket is resolved. The client has to reopen it first.",
+    });
+    const write = fake.queries.find((query) => query.sql.startsWith('update "ticket"'));
+    expect(write?.sql).toContain('"status" <>');
+    expect(write?.params).toContain("resolved");
+  });
+
+  it("still allows a priority-only change on a resolved ticket", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([ticketRow({ status: "resolved", priority: "urgent" })]);
+    fake.queueRows([ticketRow({ status: "resolved", priority: "urgent" })]);
+
+    const setStatus = router.ticket.setStatus.callable({ context: staffContext(fake) });
+    const { ticket } = await setStatus({ ticketId: "ticket-1", priority: "urgent" });
+
+    expect(ticket.status).toBe("resolved");
+    expect(ticket.priority).toBe("urgent");
+  });
+
   it("rejects an update with neither status nor priority", async () => {
     const fake = fakeDatabase();
 
@@ -704,6 +733,20 @@ describe("ticket.assign", () => {
     });
   });
 
+  it("rejects assigning a resolved ticket", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([["tech-2", "technician", false]]);
+    fake.queueRows([["tech-1", "resolved"]]);
+
+    const assign = router.ticket.assign.callable({ context: staffContext(fake) });
+
+    await expect(assign({ ticketId: "ticket-1", assigneeId: "tech-2" })).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "This ticket is resolved. The client has to reopen it first.",
+    });
+    expect(fake.queries.some((query) => query.sql.startsWith('update "ticket"'))).toBe(false);
+  });
+
   it("refuses client accounts", async () => {
     const assign = router.ticket.assign.callable({
       context: {
@@ -718,6 +761,88 @@ describe("ticket.assign", () => {
     });
 
     await expect(assign({ ticketId: "ticket-1", assigneeId: "tech-2" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
+});
+
+describe("ticket.reopen", () => {
+  const clientContext = (fake: ReturnType<typeof fakeDatabase>, organizationId = "org-acme") => ({
+    headers,
+    auth: authWithSession({
+      name: "Dana Okafor",
+      role: "client",
+      organizationId,
+    }),
+    db: fake.db,
+  });
+
+  it("sends the caller's resolved ticket back to open", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([ticketRow({ status: "resolved" })]);
+    fake.queueRows([ticketRow({ status: "open" })]);
+    fake.queueRows([ticketRow({ status: "open" })]);
+
+    const reopen = router.ticket.reopen.callable({ context: clientContext(fake) });
+    const { ticket } = await reopen({ ticketId: "ticket-1" });
+
+    expect(ticket.status).toBe("open");
+    // The write moves only the status, and the resolved check rides along so
+    // a stale tab cannot reopen a ticket someone else already reopened.
+    const write = fake.queries.find((query) => query.sql.startsWith('update "ticket"'));
+    expect(write?.params).toEqual(["open", "ticket-1", "resolved"]);
+  });
+
+  it("rejects a ticket that is not resolved", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([ticketRow({ status: "in_progress" })]);
+
+    const reopen = router.ticket.reopen.callable({ context: clientContext(fake) });
+
+    await expect(reopen({ ticketId: "ticket-1" })).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "Only a resolved ticket can be reopened.",
+    });
+    expect(fake.queries.some((query) => query.sql.startsWith('update "ticket"'))).toBe(false);
+  });
+
+  it("reports a missing ticket as not found", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([]);
+
+    const reopen = router.ticket.reopen.callable({ context: clientContext(fake) });
+
+    await expect(reopen({ ticketId: "ticket-missing" })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+  });
+
+  it("hides another organization's ticket as not found", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([ticketRow({ status: "resolved", organizationId: "org-other" })]);
+
+    const reopen = router.ticket.reopen.callable({ context: clientContext(fake) });
+
+    await expect(reopen({ ticketId: "ticket-1" })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    expect(fake.queries.some((query) => query.sql.startsWith('update "ticket"'))).toBe(false);
+  });
+
+  it("refuses staff accounts, who are locked out of resolved tickets", async () => {
+    const reopen = router.ticket.reopen.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Toni Alvarez",
+          role: "technician",
+          organizationId: null,
+        }),
+        db: fakeDatabase().db,
+      },
+    });
+
+    await expect(reopen({ ticketId: "ticket-1" })).rejects.toMatchObject({
       code: "FORBIDDEN",
     });
   });

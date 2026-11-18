@@ -269,6 +269,41 @@ export const useSetTicketStatus = (ticketId: string) => {
   );
 };
 
+/** Sends a resolved ticket back to open. Client-only, queued in the same lane. */
+export const useReopenTicket = (ticketId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation(
+    orpcQuery.ticket.reopen.mutationOptions({
+      scope: { id: `ticket:${ticketId}` },
+      onMutate: async (input) => {
+        await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.list.key() });
+        await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.listMine.key() });
+        await queryClient.cancelQueries({ queryKey: orpcQuery.ticket.get.key() });
+        const previous = snapshotTicketCaches(queryClient);
+        const epoch = nextTicketEpoch(input.ticketId);
+        patchTicketCaches(queryClient, input.ticketId, { status: "open" });
+        return { previous, epoch };
+      },
+      onError: (_error, input, context) => {
+        if (context !== undefined && isLatestTicketWrite(input.ticketId, context.epoch)) {
+          restoreSnapshot(queryClient, context.previous);
+        }
+      },
+      onSuccess: (result, input, context) => {
+        if (context === undefined || isLatestTicketWrite(input.ticketId, context.epoch)) {
+          writeTicketCaches(queryClient, result.ticket);
+        }
+      },
+      onSettled: async () => {
+        await queryClient.invalidateQueries({ queryKey: orpcQuery.ticket.list.key() });
+        await queryClient.invalidateQueries({ queryKey: orpcQuery.ticket.get.key() });
+        await queryClient.invalidateQueries({ queryKey: orpcQuery.ticket.listMine.key() });
+      },
+    }),
+  );
+};
+
 /** Hands a ticket to a chosen technician, queued in the same per-ticket lane. */
 export const useAssignTicket = (ticketId: string) => {
   const queryClient = useQueryClient();
