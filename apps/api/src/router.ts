@@ -672,7 +672,7 @@ export const ticketRouter = {
       path: "/tickets/{ticketId}/status",
       summary: "Claim a ticket, change its status, or adjust its priority",
       description:
-        "Moves a ticket to a new status and optionally changes its priority. Claims an unassigned ticket for the caller, and leaves an existing owner alone so a second technician cannot silently steal a claimed ticket. A resolved ticket is closed to staff: only the client can reopen it, so any status move on a resolved ticket is rejected. Priority remains adjustable.",
+        "Moves a ticket to a new status and optionally changes its priority. Claims an unassigned ticket for the caller, and leaves an existing owner alone so a second technician cannot silently steal a claimed ticket. A resolved ticket is frozen: no status move and no priority change until the client reopens it.",
       tags: ["Tickets"],
     })
     .input(
@@ -705,9 +705,9 @@ export const ticketRouter = {
         .where(
           and(
             eq(ticket.id, input.ticketId),
-            // Resolved is the client's call to undo. Staff moving the status
-            // would reopen work the reporter already accepted as finished.
-            ...(input.status === undefined ? [] : [ne(ticket.status, "resolved")]),
+            // Resolved is the client's call to undo. Any staff write would
+            // reopen work the reporter already accepted as finished.
+            ne(ticket.status, "resolved"),
           ),
         )
         .returning();

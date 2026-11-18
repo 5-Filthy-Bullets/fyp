@@ -519,16 +519,20 @@ describe("ticket.setStatus", () => {
     expect(write?.params).toContain("resolved");
   });
 
-  it("still allows a priority-only change on a resolved ticket", async () => {
+  it("refuses a priority-only change on a resolved ticket", async () => {
     const fake = fakeDatabase();
-    fake.queueRows([ticketRow({ status: "resolved", priority: "urgent" })]);
-    fake.queueRows([ticketRow({ status: "resolved", priority: "urgent" })]);
+    // The guarded update matches nothing, then the lookup explains why.
+    fake.queueRows([]);
+    fake.queueRows([["resolved"]]);
 
     const setStatus = router.ticket.setStatus.callable({ context: staffContext(fake) });
-    const { ticket } = await setStatus({ ticketId: "ticket-1", priority: "urgent" });
 
-    expect(ticket.status).toBe("resolved");
-    expect(ticket.priority).toBe("urgent");
+    await expect(setStatus({ ticketId: "ticket-1", priority: "urgent" })).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "This ticket is resolved. The client has to reopen it first.",
+    });
+    const write = fake.queries.find((query) => query.sql.startsWith('update "ticket"'));
+    expect(write?.sql).toContain('"status" <>');
   });
 
   it("rejects an update with neither status nor priority", async () => {
