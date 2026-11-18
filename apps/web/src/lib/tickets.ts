@@ -3,6 +3,8 @@ import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type { RouterClient } from "@orpc/server";
 import { useCallback, useEffect } from "react";
 import type { AppRouter } from "../../../api/src/router";
+import { authClient } from "@/auth";
+import { isRole } from "@/lib/session";
 import { orpcQuery } from "@/query";
 
 /** Tickets refetch on an interval: no websockets, so polling keeps queues fresh. */
@@ -470,6 +472,9 @@ export const useTicketMessages = (ticketId: string) =>
 /** Posts a reply (or staff-only internal note) with the message guessed up front. */
 export const usePostTicketMessage = (ticketId: string) => {
   const queryClient = useQueryClient();
+  const session = authClient.useSession();
+  const callerName = session.data?.user.name ?? null;
+  const callerRole = isRole(session.data?.user.role) ? session.data.user.role : null;
 
   return useMutation(
     orpcQuery.ticket.postMessage.mutationOptions({
@@ -484,6 +489,8 @@ export const usePostTicketMessage = (ticketId: string) => {
         const optimistic: TicketMessage = {
           id: crypto.randomUUID(),
           authorId: null,
+          authorName: callerName,
+          authorRole: callerRole,
           content: input.content ?? "",
           visibility: input.visibility ?? "public",
           attachmentUrl: input.attachmentUrl ?? null,

@@ -161,6 +161,11 @@ const ticketOutput = z.object({
 const messageOutput = z.object({
   id: z.string().describe("Message id"),
   authorId: z.string().nullable().describe("Author user id, null when the account is gone"),
+  authorName: z.string().nullable().describe("Author display name, null when the account is gone"),
+  authorRole: z
+    .enum(userRole.enumValues)
+    .nullable()
+    .describe("Author account role, null when the account is gone"),
   content: z.string().describe("Reply or note text, empty when the message is only an attachment"),
   visibility: z.enum(messageVisibility.enumValues).describe("public replies vs staff-only notes"),
   attachmentUrl: z
@@ -1148,6 +1153,8 @@ export const ticketRouter = {
         message: {
           id: created.id,
           authorId: created.authorId,
+          authorName: context.session.user.name,
+          authorRole: caller.role,
           content: created.content,
           visibility: created.visibility,
           attachmentUrl: created.attachmentUrl,
@@ -1312,6 +1319,8 @@ const selectMessages = async (db: Database, filter: MessageFilter) => {
     .select({
       id: ticketMessage.id,
       authorId: ticketMessage.authorId,
+      authorName: user.name,
+      authorRole: user.role,
       content: ticketMessage.content,
       visibility: ticketMessage.visibility,
       attachmentUrl: ticketMessage.attachmentUrl,
@@ -1320,12 +1329,15 @@ const selectMessages = async (db: Database, filter: MessageFilter) => {
       createdAt: ticketMessage.createdAt,
     })
     .from(ticketMessage)
+    .leftJoin(user, eq(ticketMessage.authorId, user.id))
     .where(and(...conditions))
     .orderBy(asc(ticketMessage.createdAt));
 
   return rows.map((row) => ({
     id: row.id,
     authorId: row.authorId,
+    authorName: row.authorName,
+    authorRole: row.authorRole,
     content: row.content,
     visibility: row.visibility,
     attachmentUrl: row.attachmentUrl,
