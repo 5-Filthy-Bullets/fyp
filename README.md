@@ -14,7 +14,7 @@ Accounts have one of three roles, and the role decides what the API returns and 
 
 Clients get a dashboard with ticket counts, a searchable and filterable list, an intake form limited to products their company is entitled to, and a ticket page with a message thread. A reply can carry images (4 files, 8 MB each) or one video up to 64 MB, hosted on UploadThing.
 
-Technicians get a queue, a "my work" view, and per-ticket actions: status, priority, assignee, escalation, public reply, or an internal note that clients never see. Their dashboard shows queue counts and the tickets they own. Admins get the full ticket list, an escalated-only view, and a dashboard with status counts, recent activity, and escalated tickets. Resolved tickets are closed to staff: no status moves and no assignment until the client reopens one.
+Technicians get a queue, a "my work" view, and per-ticket actions: status, priority, assignee, escalation, public reply, or an internal note that clients never see. Their dashboard shows queue counts and the tickets they own. Admins get the full ticket list, an escalated-only view, and a dashboard with status counts, recent activity, and escalated tickets. Resolved tickets are frozen: no status moves, no priority changes, and no assignment until the client reopens one.
 
 Lists poll: tickets every 5 seconds, message threads every 3 seconds. There are no websockets.
 

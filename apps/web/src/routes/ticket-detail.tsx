@@ -673,22 +673,24 @@ function ActionsCard({ ticketId }: { readonly ticketId: string }) {
             </select>
           </div>
         )}
-        <div className="grid gap-1.5">
-          <Label htmlFor="priority-select">Priority</Label>
-          <select
-            id="priority-select"
-            value={ticket?.priority ?? "low"}
-            onChange={(event) => changePriority(event.target.value as TicketPriority)}
-            disabled={ticket === undefined}
-            className="h-11 w-full rounded-lg border border-input bg-background px-3 text-base shadow-xs/5 outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 disabled:opacity-64 lg:h-7.5 lg:text-sm dark:bg-input/32"
-          >
-            {ticketPriorities.map((value) => (
-              <option key={value} value={value}>
-                {priorityLabel(value)}
-              </option>
-            ))}
-          </select>
-        </div>
+        {!isResolved && (
+          <div className="grid gap-1.5">
+            <Label htmlFor="priority-select">Priority</Label>
+            <select
+              id="priority-select"
+              value={ticket?.priority ?? "low"}
+              onChange={(event) => changePriority(event.target.value as TicketPriority)}
+              disabled={ticket === undefined}
+              className="h-11 w-full rounded-lg border border-input bg-background px-3 text-base shadow-xs/5 outline-none transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24 disabled:opacity-64 lg:h-7.5 lg:text-sm dark:bg-input/32"
+            >
+              {ticketPriorities.map((value) => (
+                <option key={value} value={value}>
+                  {priorityLabel(value)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         {!isResolved && (
           <form className="grid gap-1.5" onSubmit={assignTo}>
             <Label htmlFor="assignee">Assign to technician</Label>
