@@ -262,6 +262,8 @@ export const userRow = (
 export const messageColumns = [
   "id",
   "authorId",
+  "authorName",
+  "authorRole",
   "content",
   "visibility",
   "attachmentUrl",
@@ -277,6 +279,8 @@ export const messageRow = (
   const values: Record<(typeof messageColumns)[number], unknown> = {
     id: "message-1",
     authorId: "test-user-id",
+    authorName: "Toni Alvarez",
+    authorRole: "technician",
     content: "Looking into the controller logs now.",
     visibility: "public",
     attachmentUrl: null,
