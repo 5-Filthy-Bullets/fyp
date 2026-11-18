@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { router } from "./router";
 import {
   authWithSession,
   authWithoutSession,
+  clearVerificationEmails,
   fakeDatabase,
   messageRow,
   queueSignUpUser,
+  sentVerificationEmails,
   sessionHeaders,
   ticketRow,
   userRow,
@@ -1467,6 +1469,100 @@ describe("admin.user.setActive", () => {
     await expect(setActive({ userId: "test-user-id", active: false })).rejects.toMatchObject({
       code: "BAD_REQUEST",
     });
+  });
+});
+
+describe("admin.user.resendVerification", () => {
+  const adminContext = (fake: ReturnType<typeof fakeDatabase>, webUrl?: string) => ({
+    headers,
+    auth: authWithSession({
+      name: "Ada Admin",
+      role: "admin" as const,
+      organizationId: null,
+    }),
+    db: fake.db,
+    ...(webUrl === undefined ? {} : { webUrl }),
+  });
+
+  beforeEach(() => {
+    clearVerificationEmails();
+  });
+
+  it("mails the target account, not the signed-in admin", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([
+      userRow({
+        id: "client-1",
+        email: "dana@acme.test",
+        emailVerified: false,
+        role: "client",
+        organizationId: "org-acme",
+      }),
+    ]);
+
+    const resend = router.admin.user.resendVerification.callable({ context: adminContext(fake) });
+    const result = await resend({ userId: "client-1" });
+
+    expect(result.message).toContain("dana@acme.test");
+    expect(sentVerificationEmails()).toEqual([{ email: "dana@acme.test" }]);
+    // The lookup is what keeps the caller's own address out of the send.
+    expect(fake.queries[0]?.params).toContain("client-1");
+  });
+
+  it("points the link at the web app login page", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([userRow({ id: "tech-1", email: "tech@reliable.test", emailVerified: false })]);
+
+    const resend = router.admin.user.resendVerification.callable({
+      context: adminContext(fake, "https://app.example"),
+    });
+    await resend({ userId: "tech-1" });
+
+    expect(sentVerificationEmails()).toEqual([
+      {
+        email: "tech@reliable.test",
+        callbackURL: "https://app.example/login?verified=1",
+      },
+    ]);
+  });
+
+  it("skips accounts that are already verified", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([userRow({ id: "tech-1", emailVerified: true })]);
+
+    const resend = router.admin.user.resendVerification.callable({ context: adminContext(fake) });
+
+    await expect(resend({ userId: "tech-1" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(sentVerificationEmails()).toHaveLength(0);
+  });
+
+  it("reports an unknown account instead of sending", async () => {
+    const fake = fakeDatabase();
+    fake.queueRows([]);
+
+    const resend = router.admin.user.resendVerification.callable({ context: adminContext(fake) });
+
+    await expect(resend({ userId: "ghost" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(sentVerificationEmails()).toHaveLength(0);
+  });
+
+  it("refuses technicians", async () => {
+    const fake = fakeDatabase();
+
+    const resend = router.admin.user.resendVerification.callable({
+      context: {
+        headers,
+        auth: authWithSession({
+          name: "Toni Alvarez",
+          role: "technician",
+          organizationId: null,
+        }),
+        db: fake.db,
+      },
+    });
+
+    await expect(resend({ userId: "client-1" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(sentVerificationEmails()).toHaveLength(0);
   });
 });
 

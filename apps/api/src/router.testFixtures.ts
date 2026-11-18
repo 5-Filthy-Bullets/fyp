@@ -26,6 +26,24 @@ export const queueSignUpUser = (id: string): void => {
   signUpQueue.push({ id });
 };
 
+/**
+ * Verification sends the admin route asked better-auth for. Recording the
+ * body is how a test proves the target account's address went out, not the
+ * admin's own.
+ */
+export interface SentVerificationEmail {
+  readonly email: string;
+  readonly callbackURL?: string;
+}
+
+const verificationSends: SentVerificationEmail[] = [];
+
+export const sentVerificationEmails = (): readonly SentVerificationEmail[] => verificationSends;
+
+export const clearVerificationEmails = (): void => {
+  verificationSends.length = 0;
+};
+
 export const authWithSession = (user: SessionUser): SessionReader => ({
   api: {
     signUpEmail: async () => {
@@ -34,6 +52,13 @@ export const authWithSession = (user: SessionUser): SessionReader => ({
         throw new Error("No queued sign-up user. Call queueSignUpUser(id) first.");
       }
       return { user: { id: next.id } };
+    },
+    sendVerificationEmail: async ({ body }) => {
+      verificationSends.push({
+        email: body.email,
+        ...(body.callbackURL === undefined ? {} : { callbackURL: body.callbackURL }),
+      });
+      return { status: true };
     },
     getSession: async () => ({
       session: {
@@ -62,6 +87,9 @@ export const authWithoutSession = (): SessionReader => ({
   api: {
     signUpEmail: async () => {
       throw new Error("signUpEmail should not run without a session.");
+    },
+    sendVerificationEmail: async () => {
+      throw new Error("sendVerificationEmail should not run without a session.");
     },
     getSession: async () => null,
   },

@@ -626,7 +626,7 @@ function ClientUserRow({ user }: { readonly user: AdminUser }) {
       </div>
       {!user.emailVerified && (
         <div className="sm:flex sm:flex-wrap">
-          <ResendVerificationButton email={user.email} />
+          <ResendVerificationButton userId={user.id} />
         </div>
       )}
     </li>
